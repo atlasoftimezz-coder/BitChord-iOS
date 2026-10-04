@@ -53,6 +53,12 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
+      # Ad-hoc signature: installd rejects a bundle with no _CodeSignature at all
+      # ("0xe800801c No code signature found"). Sideloadly replaces it with the
+      # installer's Apple ID signature.
+      - name: Ad-hoc sign
+        run: codesign --force --sign - --timestamp=none build/dd/Build/Products/Release-iphoneos/BitChord.app
+
       - name: Package .ipa
         run: |
           mkdir -p build/ipa/Payload

@@ -14,10 +14,11 @@ targets:
     platform: iOS
     sources:
       - iosApp
-    info:
-      path: iosApp/Info.plist
     settings:
       base:
+        # Point at the checked-in plist directly. XcodeGen's `info:` key would
+        # regenerate (overwrite) it and drop the Compose / launch-screen keys.
+        INFOPLIST_FILE: iosApp/Info.plist
         PRODUCT_NAME: BitChord
         PRODUCT_BUNDLE_IDENTIFIER: com.atlasoftimezz.bitchord
         TARGETED_DEVICE_FAMILY: "1"

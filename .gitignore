@@ -46,3 +46,4 @@ AGENTS.md
 iosApp/iosApp.xcodeproj/
 build/
 .kotlin/
+dist/
