@@ -56,8 +56,15 @@ jobs:
       # Ad-hoc signature: installd rejects a bundle with no _CodeSignature at all
       # ("0xe800801c No code signature found"). Sideloadly replaces it with the
       # installer's Apple ID signature.
+      # Empty dirs (e.g. compose-resources/ before any resources exist) are a
+      # known trip-up for third-party re-signers, so drop them first.
       - name: Ad-hoc sign
-        run: codesign --force --sign - --timestamp=none build/dd/Build/Products/Release-iphoneos/BitChord.app
+        run: |
+          APP=build/dd/Build/Products/Release-iphoneos/BitChord.app
+          find "$APP" -type d -empty -delete
+          codesign --force --sign - --timestamp=none --generate-entitlement-der "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -dvvv "$APP" 2>&1 | grep -E "Format|CodeDirectory|Signature"
 
       - name: Package .ipa
         run: |
