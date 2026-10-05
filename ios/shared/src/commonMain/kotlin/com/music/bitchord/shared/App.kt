@@ -91,9 +91,7 @@ fun App(engine: AudioEngine) {
             AlertDialog(
                 onDismissRequest = { lastCrash = null },
                 title = { Text("BitChord crashed last time") },
-                text = { Text("Copy the report and send it over so it can be fixed.
-
-" + report.take(600)) },
+                text = { Text("Copy the report and send it over so it can be fixed.\n\n" + report.take(600)) },
                 confirmButton = {
                     TextButton(onClick = {
                         clipboard.setText(AnnotatedString(report))
