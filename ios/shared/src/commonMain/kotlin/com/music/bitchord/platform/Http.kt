@@ -1,5 +1,7 @@
 package com.music.bitchord.platform
 
+
+import kotlinx.coroutines.IO
 /** A finished HTTP exchange; [error] is set (and the rest empty) when there was no response at all. */
 class RawHttpResponse(
     val code: Int,

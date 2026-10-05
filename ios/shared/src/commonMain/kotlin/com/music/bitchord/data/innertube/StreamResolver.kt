@@ -176,6 +176,17 @@ object StreamResolver {
         return stream
     }
 
+    /** A new cookie or channel: URLs and client verdicts belong to the old identity. */
+    fun onSessionChanged() {
+        warmScope.launch {
+            recentLock.withLock {
+                recent.clear()
+                excluded.clear()
+            }
+        }
+        warm(0)
+    }
+
     /** Called when the player gets 403/404/410 mid-track: forget the URL, skip its client. */
     suspend fun onPlaybackRefused(stream: Stream) {
         recentLock.withLock {

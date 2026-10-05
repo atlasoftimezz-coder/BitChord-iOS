@@ -67,3 +67,40 @@ expect object KeyValueStore {
     fun getString(key: String): String?
     fun putString(key: String, value: String?)
 }
+
+/** Secrets (cookies, tokens) in the Keychain, readable only on this device while unlocked. */
+expect object SecureStore {
+    fun read(key: String): String?
+    fun write(key: String, value: String?)
+}
+
+/** The device region (ISO 3166), e.g. "IN"; "" when unknown. */
+expect fun deviceRegion(): String
+
+/** Synchronous file access for the java.io.File shim (NSFileManager on iOS). */
+expect object FileSystem {
+    fun exists(path: String): Boolean
+    fun isFile(path: String): Boolean
+    fun isDirectory(path: String): Boolean
+    fun size(path: String): Long
+    fun modifiedMillis(path: String): Long
+    fun setModifiedMillis(path: String, millis: Long): Boolean
+    fun mkdirs(path: String): Boolean
+    fun delete(path: String): Boolean
+    fun move(from: String, to: String): Boolean
+    fun list(path: String): List<String>
+    fun read(path: String): ByteArray?
+    fun write(path: String, bytes: ByteArray): Boolean
+    fun tempDirectory(): String
+    fun cachesDirectory(): String
+    fun filesDirectory(): String
+    fun documentsDirectory(): String
+}
+
+expect fun md5(data: ByteArray): ByteArray
+
+/** Unicode normalization; [form] is "NFD", "NFC", "NFKD" or "NFKC". */
+expect fun unicodeNormalize(text: String, form: String): String
+
+/** The device time zone's offset from UTC, in seconds, at [epochMs]. */
+expect fun utcOffsetSeconds(epochMs: Long): Int

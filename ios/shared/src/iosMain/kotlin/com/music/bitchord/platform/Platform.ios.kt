@@ -6,6 +6,8 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.CoreCrypto.CCHmac
+import platform.CoreCrypto.CC_MD5
+import platform.CoreCrypto.CC_MD5_DIGEST_LENGTH
 import platform.CoreCrypto.CC_SHA1
 import platform.CoreCrypto.CC_SHA256
 import platform.CoreCrypto.CC_SHA256_DIGEST_LENGTH
@@ -13,7 +15,13 @@ import platform.CoreCrypto.kCCHmacAlgSHA256
 import platform.CoreCrypto.CC_SHA1_DIGEST_LENGTH
 import platform.Foundation.NSDate
 import platform.Foundation.NSLocale
+import platform.Foundation.NSString
+import platform.Foundation.decomposedStringWithCanonicalMapping
+import platform.Foundation.precomposedStringWithCanonicalMapping
+import platform.Foundation.decomposedStringWithCompatibilityMapping
+import platform.Foundation.precomposedStringWithCompatibilityMapping
 import platform.Foundation.NSLock
+import platform.Foundation.NSRecursiveLock
 import platform.Foundation.localizedStringForLanguageCode
 import platform.Foundation.NSLog
 import platform.Foundation.NSProcessInfo
@@ -93,7 +101,35 @@ actual fun languageDisplayName(code: String, inLanguage: String): String? =
     NSLocale(localeIdentifier = inLanguage).localizedStringForLanguageCode(code)
 
 actual class PlatformLock actual constructor() {
-    private val lock = NSLock()
+    // Recursive: ported `synchronized` blocks may nest on the same lock, as the JVM allows.
+    private val lock = NSRecursiveLock()
     actual fun lock() = lock.lock()
     actual fun unlock() = lock.unlock()
+}
+
+@OptIn(ExperimentalForeignApi::class)
+@Suppress("DEPRECATION")
+actual fun md5(data: ByteArray): ByteArray {
+    val out = ByteArray(CC_MD5_DIGEST_LENGTH)
+    data.usePinned { input ->
+        out.usePinned { digest ->
+            CC_MD5(
+                if (data.isEmpty()) null else input.addressOf(0),
+                data.size.toUInt(),
+                digest.addressOf(0).reinterpret<UByteVar>(),
+            )
+        }
+    }
+    return out
+}
+
+@Suppress("CAST_NEVER_SUCCEEDS")
+actual fun unicodeNormalize(text: String, form: String): String {
+    val ns = text as NSString
+    return when (form) {
+        "NFD" -> ns.decomposedStringWithCanonicalMapping
+        "NFKD" -> ns.decomposedStringWithCompatibilityMapping
+        "NFKC" -> ns.precomposedStringWithCompatibilityMapping
+        else -> ns.precomposedStringWithCanonicalMapping
+    }
 }

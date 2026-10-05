@@ -16,6 +16,20 @@ open class Context internal constructor() {
 
     val resources: Resources = Resources()
 
+    /** Caches (purgeable) and Application Support, as Android's cacheDir / filesDir. */
+    val cacheDir: java.io.File get() = java.io.File(com.music.bitchord.platform.FileSystem.cachesDirectory())
+    val filesDir: java.io.File get() = java.io.File(com.music.bitchord.platform.FileSystem.filesDirectory())
+    fun getExternalFilesDir(type: String?): java.io.File? =
+        java.io.File(com.music.bitchord.platform.FileSystem.documentsDirectory()).let { if (type == null) it else java.io.File(it, type) }
+
+    /** Plain preferences (NSUserDefaults); see [StoredPreferences]. */
+    fun getSharedPreferences(name: String, mode: Int): SharedPreferences = StoredPreferences.open(name, secure = false)
+
+    fun deleteSharedPreferences(name: String): Boolean {
+        getSharedPreferences(name, MODE_PRIVATE).edit().clear().commit()
+        return true
+    }
+
     class Resources internal constructor() {
         fun getString(id: String): String = id
         fun getString(id: String, vararg formatArgs: Any): String = formatAndroid(id, formatArgs)
@@ -25,6 +39,7 @@ open class Context internal constructor() {
     }
 
     companion object {
-        val app: Context = Context()
+        val app: Context = android.app.Application()
+        const val MODE_PRIVATE = 0
     }
 }

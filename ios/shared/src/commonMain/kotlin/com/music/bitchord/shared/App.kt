@@ -27,6 +27,19 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import com.music.bitchord.auth.AccountController
+import com.music.bitchord.data.model.LikeStatus
+import com.music.bitchord.ui.HomeTab
+import com.music.bitchord.ui.LibraryTab
+import com.music.bitchord.ui.LibraryViewModel
+import com.music.bitchord.ui.PageScreen
+import com.music.bitchord.ui.SignInScreen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -80,16 +93,27 @@ import com.music.bitchord.ui.player.LyricsScreen
 import com.music.bitchord.playback.largeArtwork
 import com.music.bitchord.ui.SearchViewModel
 
-/** Root of the iOS app. P1: search YouTube Music and play. */
+/** Root of the iOS app: Home / Search / Library tabs, mini player, Now Playing, lyrics, sign-in. */
 @Composable
 fun App(engine: AudioEngine) {
     val player = remember { PlayerController(engine) }
     val search = remember { SearchViewModel() }
     val lyricsController = remember { LyricsController(player) }
+    val accounts = remember { AccountController() }
+    val library = remember { LibraryViewModel() }
+    val signedIn by accounts.signedIn.collectAsState()
+    val account by accounts.account.collectAsState()
+    val generation by accounts.generation.collectAsState()
+    val pages by library.pages.collectAsState()
+    var tab by remember { mutableStateOf(0) }
     var nowPlayingOpen by remember { mutableStateOf(false) }
     var lyricsOpen by remember { mutableStateOf(false) }
+    var signInOpen by remember { mutableStateOf(false) }
     var lastCrash by remember { mutableStateOf(takeLastCrash()) }
     val clipboard = LocalClipboardManager.current
+
+    // First load, and again whenever the account behind requests changes.
+    LaunchedEffect(generation) { library.reloadForAccount() }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
         lastCrash?.let { report ->
@@ -109,16 +133,56 @@ fun App(engine: AudioEngine) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 Column(Modifier.fillMaxSize()) {
-                    SearchScreen(search, player, modifier = Modifier.weight(1f))
+                    Box(Modifier.weight(1f)) {
+                        when (tab) {
+                            0 -> HomeTab(library, player, signedIn, onSignIn = { signInOpen = true })
+                            1 -> SearchScreen(search, player, modifier = Modifier.fillMaxSize())
+                            else -> LibraryTab(
+                                library, player, signedIn, account,
+                                onSignIn = { signInOpen = true },
+                                onSignOut = accounts::signOut,
+                            )
+                        }
+                        pages.lastOrNull()?.let { page -> PageScreen(page, library, player) }
+                    }
                     MiniPlayer(player, onOpen = { nowPlayingOpen = true })
+                    NavigationBar(containerColor = Color(0xFF16161A)) {
+                        listOf(
+                            Triple("Home", Icons.Filled.Home, 0),
+                            Triple("Search", Icons.Filled.Search, 1),
+                            Triple("Library", Icons.Filled.LibraryMusic, 2),
+                        ).forEach { (label, icon, index) ->
+                            NavigationBarItem(
+                                selected = tab == index && pages.isEmpty(),
+                                onClick = {
+                                    while (library.closePage()) Unit
+                                    tab = index
+                                },
+                                icon = { Icon(icon, contentDescription = label) },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
                 }
                 if (nowPlayingOpen) {
-                    NowPlaying(player, onClose = { nowPlayingOpen = false }, onOpenLyrics = { lyricsOpen = true })
+                    NowPlaying(
+                        player,
+                        library,
+                        signedIn = signedIn,
+                        onClose = { nowPlayingOpen = false },
+                        onOpenLyrics = { lyricsOpen = true },
+                    )
                 }
                 if (lyricsOpen) {
                     LyricsScreen(player, lyricsController, onClose = { lyricsOpen = false })
                 }
-                ToastHost(Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
+                if (signInOpen) {
+                    SignInScreen(accounts, onDone = { signedInNow ->
+                        signInOpen = false
+                        if (signedInNow) tab = 2
+                    })
+                }
+                ToastHost(Modifier.align(Alignment.BottomCenter).padding(bottom = 140.dp))
             }
         }
     }
@@ -342,7 +406,14 @@ private fun PlayPauseButton(state: PlayerController.State, player: PlayerControl
 }
 
 @Composable
-private fun NowPlaying(player: PlayerController, onClose: () -> Unit, onOpenLyrics: () -> Unit) {
+private fun NowPlaying(
+    player: PlayerController,
+    library: LibraryViewModel,
+    signedIn: Boolean,
+    onClose: () -> Unit,
+    onOpenLyrics: () -> Unit,
+) {
+    val likes by library.likes.collectAsState()
     val state by player.state.collectAsState()
     val song = state.current
     var scrubbing by remember { mutableStateOf<Float?>(null) }
@@ -397,7 +468,19 @@ private fun NowPlaying(player: PlayerController, onClose: () -> Unit, onOpenLyri
                 }
             }
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onOpenLyrics) { Text("Lyrics") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onOpenLyrics) { Text("Lyrics") }
+                if (signedIn && song != null) {
+                    val liked = (likes[song.videoId] ?: LikeStatus.INDIFFERENT) == LikeStatus.LIKE
+                    IconButton(onClick = { library.toggleLike(song) }) {
+                        Icon(
+                            if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = if (liked) "Unlike" else "Like",
+                            tint = if (liked) Color(0xFFFF4D6D) else Color.White,
+                        )
+                    }
+                }
+            }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             state.streamInfo?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
             val clipboard = LocalClipboardManager.current

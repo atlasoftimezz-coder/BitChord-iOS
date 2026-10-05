@@ -1,5 +1,6 @@
 package com.music.bitchord.data.lyrics
 
+import java.util.Locale
 import com.music.bitchord.data.Http
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume

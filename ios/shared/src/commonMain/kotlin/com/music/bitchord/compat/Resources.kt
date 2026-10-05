@@ -61,3 +61,9 @@ fun formatFixed(value: Double, decimals: Int): String {
     val text = if (decimals == 0) whole.toString() else "$whole." + frac.toString().padStart(decimals, '0')
     return if (negative && scaled != 0L) "-$text" else text
 }
+
+/** JVM `"fmt".format(args)` for ported code. */
+fun String.format(vararg args: Any?): String = formatAndroid(this, args)
+
+/** JVM `String.format(fmt, args)` for ported code. */
+fun String.Companion.format(format: String, vararg args: Any?): String = formatAndroid(format, args)
