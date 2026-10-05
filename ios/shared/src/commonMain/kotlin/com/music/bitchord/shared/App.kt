@@ -45,6 +45,8 @@ import com.music.bitchord.ui.DownloadIcon
 import com.music.bitchord.ui.DownloadSessionBar
 import com.music.bitchord.ui.DownloadsScreen
 import com.music.bitchord.download.Downloads
+import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.TrackAnalysisState
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -497,6 +499,7 @@ private fun NowPlaying(
                     }
                 }
             }
+            MixControls()
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             state.streamInfo?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
             val clipboard = LocalClipboardManager.current
@@ -513,4 +516,43 @@ private fun formatTime(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
     val seconds = (total % 60).toString().padStart(2, '0')
     return "${total / 60}:$seconds"
+}
+
+/** Automix on/off, the crossfade length, and what the analysis of this pair has got to. */
+@Composable
+private fun MixControls() {
+    val automix by AppSettings.smartFadeEnabled.collectAsState()
+    val crossfade by AppSettings.crossfadeSeconds.collectAsState()
+    val analysis by AppSettings.smartAnalysis.collectAsState()
+    val mixing by AppSettings.smartMixInProgress.collectAsState()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = automix,
+            onClick = { AppSettings.smartFadeEnabled.value = !automix },
+            label = { Text(if (mixing) "Automix · mixing" else "Automix") },
+        )
+        FilterChip(
+            selected = crossfade > 0,
+            onClick = {
+                val steps = listOf(0, 3, 6, 9, 12)
+                AppSettings.crossfadeSeconds.value = steps[(steps.indexOf(crossfade).coerceAtLeast(0) + 1) % steps.size]
+            },
+            label = { Text(if (crossfade > 0) "Crossfade ${crossfade}s" else "Crossfade off") },
+        )
+    }
+    if (automix) {
+        Text(
+            "This track: ${analysis.current.label()} · next: ${analysis.next.label()}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+        )
+    }
+}
+
+private fun TrackAnalysisState.label(): String = when (this) {
+    TrackAnalysisState.WAITING -> "waiting"
+    TrackAnalysisState.ANALYSING -> "analysing"
+    TrackAnalysisState.ANALYSED -> "analysed"
+    TrackAnalysisState.REFINING -> "refining"
+    TrackAnalysisState.FAILED -> "no analysis"
 }

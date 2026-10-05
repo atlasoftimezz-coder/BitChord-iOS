@@ -8,6 +8,8 @@ struct iOSApp: App {
     static let audioEngine = AVAudioEngineImpl()
     /// The Files-app import behind "On this device".
     static let filePicker = LocalFilePickerImpl()
+    /// Automix analysis: the C++ analyzer and the ONNX models.
+    static let analysis = AnalysisBridgeImpl()
 
     init() {
         Self.excludeOfflineFilesFromBackup()
@@ -36,7 +38,7 @@ struct iOSApp: App {
 /// Wraps the Kotlin `MainViewController(engine)` so SwiftUI can host the Compose UI.
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: UIViewControllerRepresentableContext<ComposeView>) -> UIViewController {
-        MainViewControllerKt.MainViewController(engine: iOSApp.audioEngine, filePicker: iOSApp.filePicker)
+        MainViewControllerKt.MainViewController(engine: iOSApp.audioEngine, filePicker: iOSApp.filePicker, analysis: iOSApp.analysis)
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: UIViewControllerRepresentableContext<ComposeView>) {}

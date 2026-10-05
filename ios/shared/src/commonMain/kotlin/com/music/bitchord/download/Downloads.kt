@@ -495,7 +495,7 @@ object Downloads {
                 // Raced against the transfer so neither waits on the other.
                 val lyrics = async { LyricsTag.forTrack(song) }
                 val cover = async { saveCover(song, coverFor(relative)) }
-                Downloader.fetch(id, stream, sink) { written, total ->
+                Downloader.fetch(id, stream, sink::append) { written, total ->
                     val fraction = written.toFloat() / total
                     _active.update { it + (id to DownloadState.Running(fraction)) }
                     DownloadSession.running(id, fraction)

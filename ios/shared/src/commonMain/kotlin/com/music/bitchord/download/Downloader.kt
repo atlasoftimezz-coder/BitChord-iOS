@@ -50,7 +50,7 @@ object Downloader {
     }
 
     /**
-     * Fetch all of [stream] into [sink].
+     * Fetch all of [stream], handing the bytes to [sink] in order.
      *
      * @param onProgress called as bytes land, with the running total and the
      *   full size. Never called with a total of zero.
@@ -59,7 +59,7 @@ object Downloader {
     suspend fun fetch(
         videoId: String,
         stream: StreamResolver.Stream,
-        sink: DownloadStore.Pending,
+        sink: (ByteArray) -> Unit,
         onProgress: (written: Long, total: Long) -> Unit,
     ): Long {
         var current = stream
@@ -91,7 +91,7 @@ object Downloader {
                     currentCoroutineContext().ensureActive()
                     val bytes = channel.readRemaining(minOf(SLICE_BYTES, length - readForChunk)).readByteArray()
                     if (bytes.isEmpty()) break
-                    sink.append(bytes)
+                    sink(bytes)
                     readForChunk += bytes.size
                     position += bytes.size
                     onProgress(position, total)

@@ -14,19 +14,33 @@ import UIKit
 /// - Owns the iOS side of a music app: audio session, interruptions (calls,
 ///   Siri, alarms), headphone unplug, and the lock screen / Control Center
 ///   Now Playing card with its remote commands.
+/// - Two decks (P6): `player` is the current one; `other` is either a standby
+///   armed with the incoming track of a crossfade (silent) or, after the
+///   handoff, the tail of the outgoing track. Kotlin's CrossfadeController
+///   rides their volumes and `TransitionFilter`s.
 final class AVAudioEngineImpl: NSObject, AudioEngine {
-    private let player = AVQueuePlayer()
+    private var player = AVQueuePlayer()
+    private var other = AVQueuePlayer()
     private weak var listener: AudioEngineListener?
+
+    private var standbyItem: AVPlayerItem?
+    private var standbyReady = false
+    private var standbyRate: Float = 1
+    private var standbyStatusObservation: NSKeyValueObservation?
+    private var tailItem: AVPlayerItem?
+    private var tailEnded = false
+    private var currentRate: Float = 1
+    /// Filters per item, attached when a transition first asks for one.
+    private var filters: [ObjectIdentifier: TransitionFilter] = [:]
+    private var timeObservers: [(AVQueuePlayer, Any)] = []
+    private var deckObservations: [NSKeyValueObservation] = []
 
     /// Loader per queued item; an item's loader must live as long as the item.
     private var loaders: [ObjectIdentifier: ChunkedResourceLoader] = [:]
     private var currentItem: AVPlayerItem?
     private var nextItem: AVPlayerItem?
 
-    private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
-    private var currentItemObservation: NSKeyValueObservation?
-    private var rateObservation: NSKeyValueObservation?
     private var notificationTokens: [NSObjectProtocol] = []
     private var pendingSeekMs: Int64?
     /// Target of a seek still in flight. Reported as the position until it lands,
@@ -45,34 +59,48 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     override init() {
         super.init()
         configureSession()
-        player.automaticallyWaitsToMinimizeStalling = true
-        player.actionAtItemEnd = .advance
+        observeDeck(player)
+        observeDeck(other)
 
-        timeObserver = player.addPeriodicTimeObserver(
+        observeSystemEvents()
+        configureRemoteCommands()
+    }
+
+    private func observeDeck(_ deck: AVQueuePlayer) {
+        deck.automaticallyWaitsToMinimizeStalling = true
+        deck.actionAtItemEnd = .advance
+
+        let observer = deck.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 4),
             queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
+        ) { [weak self, weak deck] _ in
+            guard let self, let deck, deck === self.player else { return }
             self.reportProgress()
             // The lock screen extrapolates between updates; re-anchor it every few
             // seconds so buffering stalls don't leave it running ahead.
             self.progressTicks += 1
             if self.progressTicks % 20 == 0 { self.updateNowPlayingTiming() }
         }
+        timeObservers.append((deck, observer))
 
         // The queue player moved on to the item queued with setNext.
-        currentItemObservation = player.observe(\.currentItem, options: [.old, .new]) { [weak self] _, change in
-            DispatchQueue.main.async { self?.currentItemChanged(from: change.oldValue ?? nil) }
-        }
-        rateObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+        deckObservations.append(deck.observe(\.currentItem, options: [.old, .new]) { [weak self] deck, change in
             DispatchQueue.main.async {
-                self?.reportProgress()
-                self?.updateNowPlayingTiming()
+                guard let self else { return }
+                if deck === self.player {
+                    self.currentItemChanged(from: change.oldValue ?? nil)
+                } else if deck === self.other, deck.currentItem == nil, self.tailItem != nil {
+                    self.tailEnded = true
+                }
             }
-        }
-
-        observeSystemEvents()
-        configureRemoteCommands()
+        })
+        deckObservations.append(deck.observe(\.timeControlStatus, options: [.new]) { [weak self] deck, _ in
+            DispatchQueue.main.async {
+                guard let self, deck === self.player else { return }
+                self.reportProgress()
+                self.updateNowPlayingTiming()
+            }
+        })
     }
 
     // MARK: - AudioEngine
@@ -107,18 +135,26 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         guard let item = nextItem else { return }
         nextItem = nil
         player.remove(item)
+        dropItem(item)
+    }
+
+    private func dropItem(_ item: AVPlayerItem) {
         loaders.removeValue(forKey: ObjectIdentifier(item))?.cancelAll()
+        filters.removeValue(forKey: ObjectIdentifier(item))
     }
 
     func pause() {
         pausedByInterruption = false
         player.pause()
+        if tailItem != nil { other.pause() }
         reportProgress()
     }
 
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
+        if currentRate != 1 { player.rate = currentRate }
+        if isTailPlaying() { other.play() }
         reportProgress()
     }
 
@@ -142,6 +178,8 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     }
 
     func stop() {
+        releaseOtherDeck()
+        currentRate = 1
         player.pause()
         player.removeAllItems()
         statusObservation = nil
@@ -149,6 +187,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         nextItem = nil
         loaders.values.forEach { $0.cancelAll() }
         loaders.removeAll()
+        filters.removeAll()
         pendingSeekMs = nil
         seekingToMs = nil
         pausedByInterruption = false
@@ -196,6 +235,127 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         let center = MPRemoteCommandCenter.shared()
         center.nextTrackCommand.isEnabled = hasNext
         center.previousTrackCommand.isEnabled = hasPrevious
+    }
+
+    // MARK: - Second deck (crossfades)
+
+    func armStandby(url: String, headers: [String: String], mimeType: String, contentLength: Int64,
+                    chunkBytes: Int64, startMs: Int64, rate: Float) {
+        releaseOtherDeck()
+        guard let item = makeItem(url: url, headers: headers, mimeType: mimeType,
+                                  contentLength: contentLength, chunkBytes: chunkBytes) else { return }
+        // Beatmatching stretches tempo; keep the pitch.
+        item.audioTimePitchAlgorithm = .timeDomain
+        standbyItem = item
+        standbyReady = false
+        standbyRate = rate > 0 ? rate : 1
+        other.volume = 0
+        other.insert(item, after: nil)
+        standbyStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            DispatchQueue.main.async {
+                guard let self, item === self.standbyItem, item.status == .readyToPlay else { return }
+                self.standbyStatusObservation = nil
+                self.ensureFilter(item)
+                let markReady: (Bool) -> Void = { [weak self] _ in
+                    DispatchQueue.main.async {
+                        guard let self, item === self.standbyItem else { return }
+                        self.standbyReady = true
+                    }
+                }
+                if startMs > 0 {
+                    self.other.seek(to: CMTime(value: startMs, timescale: 1000),
+                                    toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: markReady)
+                } else {
+                    markReady(true)
+                }
+            }
+        }
+    }
+
+    func isStandbyReady() -> Bool {
+        standbyItem != nil && standbyReady
+    }
+
+    func handoffToStandby() {
+        guard let incoming = standbyItem else { return }
+        let outgoing = player
+        // The outgoing deck must not advance into the track about to play on the other one.
+        if let queued = nextItem {
+            outgoing.remove(queued)
+            dropItem(queued)
+            nextItem = nil
+        }
+        tailItem = currentItem
+        tailEnded = false
+        standbyItem = nil
+        standbyReady = false
+        standbyStatusObservation = nil
+        player = other
+        other = outgoing
+        pendingSeekMs = nil
+        seekingToMs = nil
+        currentRate = standbyRate
+        becomeCurrent(incoming)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        player.playImmediately(atRate: standbyRate)
+        reportProgress()
+        updateNowPlayingTiming()
+    }
+
+    func setDeckVolumes(current: Float, other otherVolume: Float) {
+        player.volume = current
+        other.volume = otherVolume
+    }
+
+    func setDeckFilters(currentLowPassHz: Float, currentHighPassHz: Float,
+                        otherLowPassHz: Float, otherHighPassHz: Float) {
+        apply(to: currentItem, low: currentLowPassHz, high: currentHighPassHz)
+        apply(to: tailItem ?? standbyItem, low: otherLowPassHz, high: otherHighPassHz)
+    }
+
+    private func apply(to item: AVPlayerItem?, low: Float, high: Float) {
+        guard let item else { return }
+        let open = low >= TransitionFilter.openHz - 1 && high <= TransitionFilter.offHz + 1
+        let filter = filters[ObjectIdentifier(item)] ?? (open ? nil : ensureFilter(item))
+        filter?.targetLowPassHz = low
+        filter?.targetHighPassHz = high
+    }
+
+    @discardableResult
+    private func ensureFilter(_ item: AVPlayerItem) -> TransitionFilter {
+        if let existing = filters[ObjectIdentifier(item)] { return existing }
+        let filter = TransitionFilter()
+        filter.attach(to: item)
+        filters[ObjectIdentifier(item)] = filter
+        return filter
+    }
+
+    func currentPositionMs() -> Int64 {
+        if let seeking = seekingToMs { return seeking }
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? Int64(seconds * 1000) : 0
+    }
+
+    func isTailPlaying() -> Bool {
+        guard let tail = tailItem else { return false }
+        return !tailEnded && other.currentItem === tail
+    }
+
+    func releaseOtherDeck() {
+        standbyStatusObservation = nil
+        other.pause()
+        other.items().forEach { dropItem($0) }
+        other.removeAllItems()
+        other.volume = 1
+        standbyItem = nil
+        standbyReady = false
+        tailItem = nil
+        tailEnded = false
+    }
+
+    func setCurrentRate(rate: Float) {
+        currentRate = rate > 0 ? rate : 1
+        if player.rate != 0 { player.rate = currentRate }
     }
 
     // MARK: - Items
@@ -265,7 +425,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     private func currentItemChanged(from old: AVPlayerItem?) {
         let now = player.currentItem
         if let old, old !== now {
-            loaders.removeValue(forKey: ObjectIdentifier(old))?.cancelAll()
+            dropItem(old)
         }
         guard let now else {
             // Queue ran dry: the last item ended (or everything was removed by stop()).

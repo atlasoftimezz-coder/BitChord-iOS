@@ -6,6 +6,7 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.platform.FileSystem
+import com.music.bitchord.playback.smart.TrackAnalyzer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,14 +55,28 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
     private var queuedStream: StreamResolver.Stream? = null
     private var retriedRefusal = false
 
+    private val analyzer = TrackAnalyzer()
+
+    /** Crossfade and Automix: arms the next track on the engine's second deck and rides the blend. */
+    private val crossfade = CrossfadeController(scope, engine, object : CrossfadeController.Host {
+        override val current: Song? get() = _state.value.current
+        override val next: Song? get() = _state.value.let { it.queue.getOrNull(it.index + 1) }
+        override val isPlaying: Boolean get() = _state.value.isPlaying
+        override val durationMs: Long get() = _state.value.durationMs
+        override fun nextStream(): StreamResolver.Stream? = queuedStream?.takeIf { it.videoId == next?.videoId }
+        override fun onHandoff(stream: StreamResolver.Stream) = handedOff(stream)
+    }, analyzer)
+
     init {
         engine.setListener(this)
+        crossfade.start()
         // Off the cold-start path: the first tap on a track is rarely sooner than two seconds.
         StreamResolver.warm()
     }
 
     fun playQueue(songs: List<Song>, startIndex: Int) {
         if (songs.isEmpty()) return
+        crossfade.onSkipRequested()
         _state.update { it.copy(queue = songs, index = startIndex.coerceIn(songs.indices)) }
         load()
     }
@@ -79,11 +94,13 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
 
     fun next() {
         if (!_state.value.hasNext) return
+        crossfade.onSkipRequested()
         _state.update { it.copy(index = it.index + 1) }
         load()
     }
 
     fun previous() {
+        crossfade.onSkipRequested()
         val s = _state.value
         // Like every music app: back restarts the track unless it has barely begun.
         if (s.positionMs > 3_000 || !s.hasPrevious) {
@@ -95,6 +112,7 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
     }
 
     fun seekTo(positionMs: Long) {
+        crossfade.onSkipRequested()
         _state.update { it.copy(positionMs = positionMs) }
         engine.seekTo(positionMs)
     }
@@ -238,11 +256,36 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         }
     }
 
+    /**
+     * The crossfade just made the incoming track the engine's current deck: move
+     * the queue onto it. The outgoing deck dropped whatever was queued after it,
+     * so the gapless pre-resolve starts again for the track after this one.
+     */
+    private fun handedOff(stream: StreamResolver.Stream) {
+        prefetchJob?.cancel()
+        queuedStream = null
+        currentStream = stream
+        retriedRefusal = false
+        _state.update {
+            it.copy(
+                index = it.index + 1,
+                positionMs = 0,
+                durationMs = 0,
+                error = null,
+                streamInfo = describe(stream, it.queue.getOrNull(it.index + 1)),
+            )
+        }
+        publishNowPlaying()
+        prefetchNext()
+    }
+
     override fun onEnded() {
+        crossfade.onTrackChangedUnderneath()
         if (_state.value.hasNext) next() else _state.update { it.copy(isPlaying = false, positionMs = 0) }
     }
 
     override fun onAdvancedToNext() {
+        crossfade.onTrackChangedUnderneath()
         val stream = queuedStream ?: return
         queuedStream = null
         currentStream = stream

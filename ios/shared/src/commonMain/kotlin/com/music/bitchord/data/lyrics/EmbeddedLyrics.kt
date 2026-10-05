@@ -359,7 +359,7 @@ object EmbeddedLyrics {
             out.write(buffer, 0, read)
             total += read
         }
-        return out.toByteArray()
+        return out.encodeToByteArray()
     }
 
     /** ISO-8859-1: one char per byte (iOS has no java.nio charsets). */

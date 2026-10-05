@@ -55,6 +55,27 @@ object AppSettings {
     /** Whether third-party lyric services may be asked at all (also gates lyrics saved with downloads). */
     val syncedLyrics = boolean("synced_lyrics", true)
 
+    /** Fixed crossfade length in seconds; 0 is off. Also Automix's fallback while a pair is unanalysed. */
+    val crossfadeSeconds = int("crossfade_seconds", 0)
+
+    /** Automix: transition timing, length, cue and style come from each pair's analysis. */
+    val smartFadeEnabled = boolean("smart_fade_enabled", false)
+
+    /** The CPU budget used by Beat This! and vocal analysis for Automix. */
+    val automixPerformanceMode = MutableStateFlow(
+        AutomixPerformanceMode.entries.firstOrNull { it.name == KeyValueStore.getString("automix_performance_mode") }
+            ?: AutomixPerformanceMode.BALANCED,
+    ).also { flow -> persist(flow) { KeyValueStore.putString("automix_performance_mode", it.name) } }
+
+    /** Not persisted: true while a transition doing more than a plain fade is audible. */
+    val smartMixInProgress = MutableStateFlow(false)
+
+    /** Not persisted: analysis state of the playing and next track, for the stats line. */
+    val smartAnalysis = MutableStateFlow(SmartAnalysis())
+
+    /** Not persisted: where the next transition sits on the playing track's timeline. */
+    val smartTransitionWindow = MutableStateFlow<TransitionWindow?>(null)
+
     /** User-issued credential required by api.paxsenix.org. */
     val paxSenixApiKey = string("paxsenix_api_key", "")
 
