@@ -33,7 +33,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,7 +59,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +70,8 @@ import coil3.compose.AsyncImage
 import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.platform.recentLog
+import com.music.bitchord.platform.takeLastCrash
 import com.music.bitchord.playback.AudioEngine
 import com.music.bitchord.playback.PlayerController
 import com.music.bitchord.playback.largeArtwork
@@ -77,8 +83,26 @@ fun App(engine: AudioEngine) {
     val player = remember { PlayerController(engine) }
     val search = remember { SearchViewModel() }
     var nowPlayingOpen by remember { mutableStateOf(false) }
+    var lastCrash by remember { mutableStateOf(takeLastCrash()) }
+    val clipboard = LocalClipboardManager.current
 
     MaterialTheme(colorScheme = darkColorScheme()) {
+        lastCrash?.let { report ->
+            AlertDialog(
+                onDismissRequest = { lastCrash = null },
+                title = { Text("BitChord crashed last time") },
+                text = { Text("Copy the report and send it over so it can be fixed.
+
+" + report.take(600)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(report))
+                        lastCrash = null
+                    }) { Text("Copy report") }
+                },
+                dismissButton = { TextButton(onClick = { lastCrash = null }) { Text("Dismiss") } },
+            )
+        }
         Surface(modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 Column(Modifier.fillMaxSize()) {
@@ -368,6 +392,12 @@ private fun NowPlaying(player: PlayerController, onClose: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             state.streamInfo?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
+            val clipboard = LocalClipboardManager.current
+            var copied by remember { mutableStateOf(false) }
+            TextButton(onClick = {
+                clipboard.setText(AnnotatedString(recentLog()))
+                copied = true
+            }) { Text(if (copied) "Debug log copied" else "Copy debug log", style = MaterialTheme.typography.labelSmall) }
         }
     }
 }

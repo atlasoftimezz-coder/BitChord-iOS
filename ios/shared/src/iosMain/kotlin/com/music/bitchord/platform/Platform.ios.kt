@@ -40,6 +40,10 @@ actual fun sha1(data: ByteArray): ByteArray {
 }
 
 actual fun platformLog(level: String, tag: String, message: String) {
-    // NSLog treats its first argument as a format string; pass the text as an argument.
-    NSLog("%@", "$level/$tag: $message")
+    val line = "$level/$tag: $message"
+    CrashCatcher.record(line)
+    // NSLog's first argument is a format string. Passing the text as a vararg
+    // ("%@", text) crashes — Kotlin does not box a String into an NSString for
+    // C varargs — so escape the percent signs and pass it as the format itself.
+    NSLog(line.replace("%", "%%"))
 }
