@@ -61,7 +61,7 @@ ios/                 standalone Gradle build for iOS (Kotlin 2.4.20, Compose Mul
 | P2 fixes | Crash on first log line (NSLog varargs), crash catcher with "Copy report", "Copy debug log" button, steadier timeline, InnerTubeX warm-up and persisted cipher caches (slow first play) | Built; partly confirmed |
 | P3 | Lyrics: all providers, word-synced panel, translation and romanization, provider picker | Built 2026-10-05 13:20, **not yet confirmed by user** |
 | P4 | Google sign-in (WKWebView, Safari user agent), Keychain session, Home feed, Library (liked songs, library songs, playlists/albums/artists), album/playlist/artist pages with Play and Shuffle, Like button, tabs | Built 2026-10-05 15:01, **not yet tested by user** |
-| P5 | Downloads and offline, local files | Todo |
+| P5 | Downloads (queue, 3 workers, batch bar, album/playlist Download), offline playback with stream fallback, lyrics `.lrc` sidecar + EmbeddedLyrics, Files-app import ("On this device") | Built 2026-10-05 15:54, **not yet tested by user** |
 | P6 | Automix (beat-matching DJ transitions) and AI (ONNX beat detection, vocal separation) | Todo |
 | P7 | Everything else (list below) and porting the real BitChord UI | Todo |
 
@@ -78,12 +78,14 @@ ios/                 standalone Gradle build for iOS (Kotlin 2.4.20, Compose Mul
 
 Full parity with the Android README. Each item's Android source is under `app/src/main/java/com/music/bitchord/...`.
 
-**P5: Downloads and offline**
-- `download/*`: Downloads.kt (1426 lines), DownloadSession, DownloadStore, taggers (Mp4/Flac/Webm), OfflineDash, DownloadService.
-- `ios/shared/.../download/Downloads.kt` is currently a **placeholder** with the real API. Replace it with the port.
-- Store files under Application Support (use the `java.io.File` shim with `Context.filesDir`).
-- Offline playback: AVPlayer can play a local file URL.
-- Local music library (`data/LocalMediaRepository.kt`, `data/lyrics/EmbeddedLyrics.kt`, `data/remote/EmbeddedArt.kt`). iOS has no shared file store: use a Files-app import (UIDocumentPicker) and/or the MPMediaLibrary of DRM-free songs. Placeholders exist in `data/LaterPhaseStubs.kt` and `data/lyrics/EmbeddedLyrics.kt`.
+**P5: done (how it works on iOS)**
+- `download/`: `DownloadSession`, `LyricsTag`, `data/lyrics/LrcWriter` and `EmbeddedLyrics` are ported. `Downloads` is a port with iOS changes. `DownloadStore` and `Downloader` are iOS-native.
+- Files: `Application Support/Downloads/<videoId>.m4a`, plus `.jpg` (cover) and `.m4a.lrc` (lyrics sidecar). Records hold **relative** paths, because the container path changes on reinstall. The folders are excluded from iCloud backup (iOSApp.swift).
+- AAC/MP4 from YouTube only. Not ported: no retagging (the sidecar replaces it), and no Mp4/Flac/Webm taggers, OfflineDash/Hls or source routes. These come with pluggable sources in P7, along with the Wi-Fi-only setting.
+- Downloads run in-process. A UIKit background-task grant gives about 30 s after the app leaves the foreground; while audio is playing, the app keeps running anyway.
+- `PlayerController.localStream` plays the downloaded or imported file. If the file fails, it streams the track once instead. Swift `AudioEngine` plays `file://` directly; artwork can be a plain path.
+- Local files: `data/LocalMediaRepository.kt` (Kotlin) and `iosApp/LocalFilePicker.swift` (UIDocumentPicker + AVFoundation tags). Ids are `local:<uuid>`. MPMediaLibrary was not used.
+- Not done in P5: the Android download sheet/Downloads page UI (P7).
 
 **P6: Automix and AI**
 - `playback/CrossfadeController.kt` (crossfade 0–12 s), Automix/beat-matching, `TransitionFilterProcessor`, QueueCoordinator.
@@ -145,10 +147,12 @@ Full parity with the Android README. Each item's Android source is under `app/sr
 - `NSLog("%@", kotlinString)` crashes, because Kotlin does not bridge Strings through C varargs. Pass the escaped text as the format string.
 - NSURLRequest/NSURLSession category methods (`setHTTPMethod`, `setValue:forHTTPHeaderField:`, `dataTaskWithRequest:completionHandler:`) need explicit `platform.Foundation.*` imports. So do NSLocale `preferredLanguages` and NSTimeZone `localTimeZone`.
 - A Kotlin class named `Context` is exported to Swift and clashes with SwiftUI's `Context`. Swift code uses `UIViewControllerRepresentableContext<…>`.
+- A Kotlin class named `URL` is exported via Shared: Swift files that `import Shared` must write `Foundation.URL` in type positions.
+- `fix_ported.py` rewrites `ByteArrayOutputStream.toByteArray()` to `encodeToByteArray()` (wrong), and leaves `Charsets.*` alone (no shim). Check ported byte-handling code by hand.
 - **On this PC, the Bash tool's heredocs and `python -c` strings eat backslashes.** Write any file containing `\` with the Write tool, or build the character with `chr(92)`.
 - The PC's Windows drive C: is nearly full (about 7 GB free). Keep everything on D:.
 
 ## Next step
 
-1. Get the user's test results for P3 (lyrics) and P4 (sign-in, Home, Library, likes), and fix anything broken.
-2. Then start **P5 (downloads and offline)**, keeping to that phase's scope. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
+1. Get the user's test results for P3 (lyrics), P4 (sign-in, Home, Library, likes) and P5 (downloads, offline, Files import), and fix anything broken.
+2. Then start **P6 (Automix + AI)**, keeping to that phase's scope. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
