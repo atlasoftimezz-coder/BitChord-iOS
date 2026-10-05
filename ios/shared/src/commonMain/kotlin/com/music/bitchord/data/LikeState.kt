@@ -1,5 +1,6 @@
 package com.music.bitchord.data
 
+import com.music.bitchord.compat.putIfAbsent
 import com.music.bitchord.data.model.LikeStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

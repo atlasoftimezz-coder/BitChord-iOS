@@ -56,3 +56,10 @@ class SortedMutableSet<T : Comparable<T>> : AbstractMutableSet<T>() {
     fun first(): T = items.first()
     fun last(): T = items.last()
 }
+
+/** JDK `Map.putIfAbsent` for ported code. */
+fun <K, V> MutableMap<K, V>.putIfAbsent(key: K, value: V): V? {
+    val existing = this[key]
+    if (existing == null) this[key] = value
+    return existing
+}
