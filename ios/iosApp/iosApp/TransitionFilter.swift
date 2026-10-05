@@ -190,7 +190,7 @@ final class TransitionFilter {
             unprepare: nil,
             process: tapProcess
         )
-        var tap: MTAudioProcessingTap?
+        var tap: Unmanaged<MTAudioProcessingTap>?
         let status = MTAudioProcessingTapCreate(
             kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
         )
@@ -199,7 +199,7 @@ final class TransitionFilter {
             return
         }
         let parameters = AVMutableAudioMixInputParameters(track: track)
-        parameters.audioTapProcessor = tap
+        parameters.audioTapProcessor = tap.takeRetainedValue()
         let mix = AVMutableAudioMix()
         mix.inputParameters = [parameters]
         item.audioMix = mix
