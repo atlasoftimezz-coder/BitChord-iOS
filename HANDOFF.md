@@ -140,6 +140,41 @@ Full parity with the Android README. Each item's Android source is under `app/sr
 - **Strings:** `R.string.x` is the English text itself. Regenerate it with `python ios/tools/gen_strings.py` after upstream changes.
 - **Playback architecture:** Kotlin `PlayerController` (queue, resolve, retries) drives the Swift `AudioEngine` through the Kotlin `AudioEngine` interface. Streams are AAC/MP4 from InnerTubeX (`StreamResolver.kt`). InnerTubeX v0.7.4 iOS klibs come from JitPack; they require Kotlin ≥ 2.4.10.
 
+## P6 plan (researched 2026-10-05; no code written yet)
+
+**Engine: dual AVPlayer decks, not AVAudioEngine.** AVAudioEngine cannot stream HTTP without a custom decoder. The Android CrossfadeController is tick-driven anyway (30 ms gain and filter steps, position-based), so two AVQueuePlayers are a faithful port.
+- Swift `AudioEngine` gets an active deck and a standby deck. The Kotlin interface gains:
+  - `armStandby(url, headers, mime, len, chunk, startMs, rate)`: load silent and paused, seeked to the cue point.
+  - `standbyReady()`, `startStandby()` and `swapDecks()`. `swapDecks()` is the handoff: the standby becomes active, and the old deck keeps playing as the tail. Call `clearNext` on the tail so it does not advance.
+  - `setGains(active, other)`, `setFilters(lpA, hpA, lpB, hpB)`, `stopTail()` and `cancelStandby()`. Progress, remote commands and Now Playing must follow the active deck.
+- Gains: `AVPlayer.volume`. Beatmatch: `player.rate` with `item.audioTimePitchAlgorithm = .timeDomain`.
+- Filters: an `MTAudioProcessingTap` on `item.audioMix`, with a 24 dB/oct LP and HP (two cascaded biquads each). Load the `tracks` key first. If the tap cannot be made, fall back to gains only.
+- Port `CrossfadeController.kt` as-is in logic: phases IDLE/ARMING/FADING/BAILING, `rideFilters`/`rideBassSwap`/`rideFilterSweep`/`rideVocalSeparation`, sin/cos gains, all constants. Drive it from `PlayerController` instead of ExoPlayer. Skip sleep-fade and party.
+
+**Analysis:** `native/analyzer/*.cpp` is plain C++17 with only std includes. Compile it into iosApp via XcodeGen sources `../../native/analyzer`, with `HEADER_SEARCH_PATHS $(SRCROOT)/../../native`, c++17, plus a C wrapper and a bridging header. Reuse `app/src/main/cpp/jni/analysis_jni.cpp`'s JSON writer.
+- A Kotlin `NativeAnalysis` interface is implemented in Swift. Keep big buffers on the Swift side:
+  - `analyzeFeatures(path, duration)`: decode mono with AVAudioFile, `Resample` to 11025, `AnalyzeAudio`, return JSON. Parse it with the ported `TrackFeatures.parse`.
+  - `beatLogits(path, start, end)`: mono, resample to 22050, `ComputeBeatSpectrogram`, ORT in 1500-frame chunks with a 6-frame border, return beat and downbeat logits plus the actual start. Port the `BeatTracker.track` post-processing (pickPeaks, tempo, confidence) in Kotlin.
+  - `vocalCurve(path, start, end)`: stereo at 44100, `ComputeVocalSpectrogram`, zero-pad to 960 frames, ORT, then `reduceToBandCurve` (200–4000 Hz) in Swift.
+- ONNX: SPM `https://github.com/microsoft/onnxruntime-swift-package-manager` from 1.24.2, product `onnxruntime`, Swift `import OnnxRuntimeBindings`. API:
+  - `ORTEnv(loggingLevel:)`
+  - `ORTSession(env:modelPath:sessionOptions:)`
+  - `ORTValue(tensorData:elementType:.float,shape:)`
+  - `run(withInputs:outputNames:runOptions:)`
+  - `tensorData()`
+  - `inputNames()`
+- Models: bundle `app/src/main/assets/beat_this_int8.onnx` (4.3 MB) and `vocals_umxhq_int8.onnx` (8.6 MB) as resources.
+- Pure Kotlin files to port unchanged:
+  - `smart/TransitionPlanner.kt`, `TransitionPolicy.kt` and `TrackAnalysis.kt`
+  - `TrackFeatures.parse`
+  - `AnalysisStore.kt` (Context/File shims)
+  - Add to iOS AppSettings: `crossfadeSeconds`, `smartFadeEnabled`, `automixPerformanceMode`, `smartMixInProgress`, `smartAnalysis`, `smartTransitionWindow`, `SmartAnalysis`, `TrackAnalysisState`, `TransitionWindow`.
+- `TrackAnalyzer`: a simplified port. Source file:
+  - Downloaded or imported tracks: the existing file.
+  - Streamed tracks: fetch the m4a to `Caches/analysis/<id>.m4a` with `Downloader`, then delete it after analysis.
+  - Run the whole-track features, then the head and tail windows (`BeatTracker.WINDOW_SECONDS`), then merge exactly as `TrackAnalyzer.analyze` does. Persist through AnalysisStore.
+- UI: Automix toggle and crossfade-seconds slider in Now Playing or Library. The full Settings screen stays in P7.
+
 ## Gotchas (all hit and solved)
 
 - XcodeGen's `info:` key overwrites Info.plist. Use the `INFOPLIST_FILE` build setting instead.
@@ -155,4 +190,4 @@ Full parity with the Android README. Each item's Android source is under `app/sr
 ## Next step
 
 1. Get the user's test results for P3 (lyrics), P4 (sign-in, Home, Library, likes) and P5 (downloads, offline, Files import), and fix anything broken.
-2. Then start **P6 (Automix + AI)**, keeping to that phase's scope. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
+2. Then start **P6 (Automix + AI)** following "P6 plan" above, keeping to that phase's scope. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
