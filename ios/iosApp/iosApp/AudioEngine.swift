@@ -29,6 +29,10 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     private var rateObservation: NSKeyValueObservation?
     private var notificationTokens: [NSObjectProtocol] = []
     private var pendingSeekMs: Int64?
+    /// Target of a seek still in flight. Reported as the position until it lands,
+    /// so the timeline doesn't jump back to the old spot while the new range loads.
+    private var seekingToMs: Int64?
+    private var progressTicks = 0
 
     /// Paused by an interruption (call, Siri) rather than by the user, so it may resume after.
     private var pausedByInterruption = false
@@ -47,7 +51,14 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 4),
             queue: .main
-        ) { [weak self] _ in self?.reportProgress() }
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.reportProgress()
+            // The lock screen extrapolates between updates; re-anchor it every few
+            // seconds so buffering stalls don't leave it running ahead.
+            self.progressTicks += 1
+            if self.progressTicks % 20 == 0 { self.updateNowPlayingTiming() }
+        }
 
         // The queue player moved on to the item queued with setNext.
         currentItemObservation = player.observe(\.currentItem, options: [.old, .new]) { [weak self] _, change in
@@ -117,9 +128,16 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
             return
         }
         let time = CMTime(value: positionMs, timescale: 1000)
-        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-            self?.reportProgress()
-            self?.updateNowPlayingTiming()
+        // A little tolerance lets AVPlayer land on the nearest audio packet
+        // instead of decoding up to an exact sample — much faster over the network.
+        let tolerance = CMTime(value: 250, timescale: 1000)
+        seekingToMs = positionMs
+        reportProgress()
+        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
+            guard let self else { return }
+            if self.seekingToMs == positionMs { self.seekingToMs = nil }
+            self.reportProgress()
+            self.updateNowPlayingTiming()
         }
     }
 
@@ -132,6 +150,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         loaders.values.forEach { $0.cancelAll() }
         loaders.removeAll()
         pendingSeekMs = nil
+        seekingToMs = nil
         pausedByInterruption = false
     }
 
@@ -145,7 +164,10 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
             MPNowPlayingInfoPropertyPlaybackRate: 0.0,
         ]
         if let album { nowPlaying[MPMediaItemPropertyAlbumTitle] = album }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlaying
+        // Fill in duration/position/rate from the player right away: after an
+        // automatic advance the new item is already ready, so no status change
+        // will come along to do it.
+        updateNowPlayingTiming()
 
         guard let artworkUrl, let url = URL(string: artworkUrl) else { return }
         let expectedTitle = title
@@ -198,7 +220,9 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     /// Point the status observation and the end/fail notifications at [item].
     private func becomeCurrent(_ item: AVPlayerItem) {
         currentItem = item
-        statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+        seekingToMs = nil
+        // .initial: a queued item is usually ready before it becomes current.
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             DispatchQueue.main.async {
                 guard let self, item === self.currentItem else { return }
                 switch item.status {
@@ -245,7 +269,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
 
     private func reportProgress() {
         guard let item = player.currentItem else { return }
-        let position = player.currentTime().seconds
+        let position = seekingToMs.map { Double($0) / 1000 } ?? player.currentTime().seconds
         let duration = item.duration.seconds
         let isPlaying = player.timeControlStatus == .playing
         let isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
@@ -264,7 +288,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     /// it only needs telling on play/pause/seek/track change, not every tick.
     private func updateNowPlayingTiming() {
         guard !nowPlaying.isEmpty else { return }
-        let position = player.currentTime().seconds
+        let position = seekingToMs.map { Double($0) / 1000 } ?? player.currentTime().seconds
         if let duration = player.currentItem?.duration.seconds, duration.isFinite {
             nowPlaying[MPMediaItemPropertyPlaybackDuration] = duration
         }
