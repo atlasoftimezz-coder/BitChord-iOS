@@ -33,7 +33,7 @@ final class LocalFilePickerImpl: NSObject, LocalFilePicker, UIDocumentPickerDele
         }
     }
 
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [Foundation.URL]) {
         let directory = self.directory
         let listener = self.listener
         self.listener = nil
@@ -56,12 +56,12 @@ final class LocalFilePickerImpl: NSObject, LocalFilePicker, UIDocumentPickerDele
 
     // MARK: - Import
 
-    private static func importFile(_ url: URL, into directory: String) -> ImportedAudio? {
+    private static func importFile(_ url: Foundation.URL, into directory: String) -> ImportedAudio? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
         let fileManager = FileManager.default
-        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+        let folder = Foundation.URL(fileURLWithPath: directory, isDirectory: true)
         try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         let ext = url.pathExtension.isEmpty ? "audio" : url.pathExtension.lowercased()
         let stem = UUID().uuidString
