@@ -17,7 +17,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import platform.CoreGraphics.CGRectZero
+import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
@@ -79,7 +79,7 @@ actual fun YtMusicLoginScreen(
             val config = WKWebViewConfiguration().apply {
                 websiteDataStore = WKWebsiteDataStore.defaultDataStore()
             }
-            val view = WKWebView(frame = CGRectZero, configuration = config)
+            val view = WKWebView(frame = CGRectMake(0.0, 0.0, 0.0, 0.0), configuration = config)
             view.customUserAgent = SAFARI_AGENT
             view.navigationDelegate = delegate
             webView = view

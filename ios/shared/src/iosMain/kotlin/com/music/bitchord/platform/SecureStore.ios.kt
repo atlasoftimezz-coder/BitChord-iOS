@@ -1,7 +1,7 @@
 package com.music.bitchord.platform
 
 import kotlinx.cinterop.BetaInteropApi
-import kotlinx.cinterop.CFTypeRefVar
+import platform.CoreFoundation.CFTypeRefVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr

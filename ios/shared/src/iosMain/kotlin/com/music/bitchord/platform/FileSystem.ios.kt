@@ -17,6 +17,8 @@ import platform.Foundation.NSNumber
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSUserDomainMask
+import platform.Foundation.localTimeZone
+import platform.Foundation.preferredLanguages
 import platform.Foundation.dataWithContentsOfFile
 import platform.Foundation.dateWithTimeIntervalSince1970
 import platform.Foundation.timeIntervalSince1970

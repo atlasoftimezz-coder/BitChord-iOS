@@ -4,6 +4,7 @@ import io.ktor.http.URLBuilder
 import io.ktor.http.Url
 import io.ktor.http.decodeURLPart
 import io.ktor.http.encodeURLParameter
+import io.ktor.http.encodedPath
 
 /** android.net.Uri for ported code: parsing and the accessors the app reads. */
 class Uri private constructor(private val raw: String) {

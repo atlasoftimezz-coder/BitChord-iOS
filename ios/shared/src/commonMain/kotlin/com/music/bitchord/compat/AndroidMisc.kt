@@ -32,3 +32,27 @@ inline fun <T> synchronized(lock: Any, block: () -> T): T {
 
 @PublishedApi
 internal fun lockObject(lock: Any): PlatformLock = lock as? PlatformLock ?: lockFor(lock)
+
+/** JDK `sortedSetOf()` (a TreeSet) for ported code: a set that iterates in natural order. */
+fun <T : Comparable<T>> sortedSetOf(vararg elements: T): MutableSet<T> = SortedMutableSet<T>().apply { addAll(elements) }
+
+class SortedMutableSet<T : Comparable<T>> : AbstractMutableSet<T>() {
+    private val items = ArrayList<T>()
+    override val size: Int get() = items.size
+    override fun add(element: T): Boolean {
+        val index = items.binarySearch(element)
+        if (index >= 0) return false
+        items.add(-index - 1, element)
+        return true
+    }
+    override fun contains(element: T): Boolean = items.binarySearch(element) >= 0
+    override fun iterator(): MutableIterator<T> = items.iterator()
+    override fun remove(element: T): Boolean {
+        val index = items.binarySearch(element)
+        if (index < 0) return false
+        items.removeAt(index)
+        return true
+    }
+    fun first(): T = items.first()
+    fun last(): T = items.last()
+}

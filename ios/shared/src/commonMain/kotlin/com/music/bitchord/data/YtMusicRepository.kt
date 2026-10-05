@@ -748,7 +748,7 @@ object YtMusicRepository {
             val parsed = InnertubeParser.parseLibraryItemPage(response)
             parsed.items.forEach { item ->
                 val key = item.browseId ?: item.videoId ?: "${item.title}\n${item.subtitle}"
-                out.putIfAbsent(key, item)
+                out.getOrPut(key) { item }
             }
             val token = parsed.continuation ?: break
             if (page++ >= MAX_PAGES) break
