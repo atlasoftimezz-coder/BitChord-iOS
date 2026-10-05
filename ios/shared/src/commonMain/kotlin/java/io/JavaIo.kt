@@ -160,6 +160,14 @@ open class ByteArrayOutputStream(initialSize: Int = 32) : OutputStream() {
         count += length
     }
     fun toByteArray(): ByteArray = buf.copyOf(count)
+
+    /**
+     * fix_ported.py rewrites every bare `.toByteArray()` to `.encodeToByteArray()`
+     * (right for Strings, which is what the rule is for). A member here keeps
+     * that rewrite compiling on streams, instead of it being re-broken each time
+     * the tool runs over already ported files.
+     */
+    fun encodeToByteArray(): ByteArray = toByteArray()
     fun size(): Int = count
     fun reset() {
         count = 0
@@ -199,3 +207,4 @@ class BufferedWriter(private val out: OutputStream) : AutoCloseable {
 }
 
 class StringReader(val text: String)
+
