@@ -14,7 +14,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven("https://jitpack.io") {
-            content { includeGroupByRegex("com\.github\.MetrolistGroup.*") }
+            content { includeGroupAndSubgroups("com.github.MetrolistGroup") }
         }
     }
 }
