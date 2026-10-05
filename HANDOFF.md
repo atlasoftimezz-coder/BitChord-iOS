@@ -62,8 +62,8 @@ ios/                 standalone Gradle build for iOS (Kotlin 2.4.20, Compose Mul
 | P3 | Lyrics: all providers, word-synced panel, translation and romanization, provider picker | Built 2026-10-05 13:20, **not yet confirmed by user** |
 | P4 | Google sign-in (WKWebView, Safari user agent), Keychain session, Home feed, Library (liked songs, library songs, playlists/albums/artists), album/playlist/artist pages with Play and Shuffle, Like button, tabs | Built 2026-10-05 15:01, **not yet tested by user** |
 | P5 | Downloads (queue, 3 workers, batch bar, album/playlist Download), offline playback with stream fallback, lyrics `.lrc` sidecar + EmbeddedLyrics, Files-app import ("On this device") | Built 2026-10-05 15:54, **not yet tested by user** |
-| P6 | Crossfade and Automix: second AVPlayer deck, ported CrossfadeController (filter sweep, bass swap, vocal separation), C++ analyzer and the Beat This! / open-unmix ONNX models on iOS | Built 2026-10-05, **compile status: see "Next step"; not tested by user** |
-| P7a | Settings screen (Library → gear), playback speed 0.5–2×, sleep timer (minutes / end of song) | In progress |
+| P6 | Crossfade and Automix: second AVPlayer deck, ported CrossfadeController (filter sweep, bass swap, vocal separation), C++ analyzer and the Beat This! / open-unmix ONNX models on iOS | Built 2026-10-05 (CI green, run 37341257483), **not tested by user** |
+| P7a | Settings screen (Library → gear), playback speed 0.5–2×, sleep timer (minutes / end of song) | Part 1 built (CI green, run 37341257483), not tested; EQ + skip silence todo |
 | P7b | History and search history, replay/stats | Todo |
 | P7c | Scrobbling (Last.fm, ListenBrainz), Discord Rich Presence | Todo |
 | P7d | Animated album canvas | Todo |
@@ -149,7 +149,7 @@ Full parity with the Android README. Each item's Android source is under `app/sr
 ## How P6 works on iOS
 
 - **Engine:** `AudioEngine.swift` has two `AVQueuePlayer` decks. `player` is current: it drives progress, Now Playing and the remote commands. `other` holds either an armed standby (the incoming track, silent, seeked to the cue point) or, after `handoffToStandby()`, the tail of the outgoing track. The Kotlin `AudioEngine` interface has a "second deck" section listing the calls.
-- **Filters:** `TransitionFilter.swift` is a port of Android's `TransitionFilterProcessor` (24 dB/oct LP + HP, glided cutoffs). It runs as an `MTAudioProcessingTap` on the item's audio mix and is attached lazily, the first time a transition asks for a non-open filter. Playback without transitions never has a tap.
+- **Filters** (`MTAudioProcessingTapCreate` takes an `Unmanaged<MTAudioProcessingTap>?` out-parameter; use `takeRetainedValue()`): `TransitionFilter.swift` is a port of Android's `TransitionFilterProcessor` (24 dB/oct LP + HP, glided cutoffs). It runs as an `MTAudioProcessingTap` on the item's audio mix and is attached lazily, the first time a transition asks for a non-open filter. Playback without transitions never has a tap.
 - **Controller:** `playback/CrossfadeController.kt` is Android's logic with the same constants. Phases are IDLE/ARMING/FADING/BAILING; there is no sleep fade or party mode.
   - The standby is loaded from `PlayerController.queuedStream`, the gapless pre-resolve of the next track.
   - At the handoff, `PlayerController.handedOff()` advances the queue.
@@ -186,6 +186,6 @@ P7 is split into P7a–P7g (table above), one CI build and one phone test each. 
 
 ## Next step
 
-1. Check the latest CI run (`gh run list -R atlasoftimezz-coder/BitChord-iOS --limit 3`). P6 and P7a compile fixes come first if it is red. The Swift side of P6 (MTAudioProcessingTap callback types, ONNX Runtime Swift API, C++ linking) has not been through Xcode yet.
+1. The latest build is green; `dist\BitChord.ipa` is P6 + P7a part 1.
 2. Get the user's test results for P3, P4, P5, P6 and P7a, and fix what is broken.
 3. Finish P7a (equalizer, skip silence), then P7b. One sub-phase at a time. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
