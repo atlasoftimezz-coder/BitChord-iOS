@@ -17,9 +17,9 @@ struct iOSApp: App {
 
 /// Wraps the Kotlin `MainViewController(engine)` so SwiftUI can host the Compose UI.
 struct ComposeView: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIViewController {
+    func makeUIViewController(context: UIViewControllerRepresentableContext<ComposeView>) -> UIViewController {
         MainViewControllerKt.MainViewController(engine: iOSApp.audioEngine)
     }
 
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: UIViewController, context: UIViewControllerRepresentableContext<ComposeView>) {}
 }
