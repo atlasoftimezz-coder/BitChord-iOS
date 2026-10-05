@@ -6,6 +6,9 @@ name: iOS build
 on:
   push:
     branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
   workflow_dispatch:
 
 concurrency:
@@ -31,18 +34,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('build.gradle.kts') }}
+          key: konan-${{ runner.os }}-${{ hashFiles('ios/build.gradle.kts') }}
 
       - name: Generate Xcode project
         run: |
           brew install xcodegen
-          chmod +x gradlew
-          cd iosApp && xcodegen generate
+          chmod +x ios/gradlew
+          cd ios/iosApp && xcodegen generate
+
+      # Surfaces Kotlin compile errors as a short, readable step of their own
+      # instead of somewhere inside the Xcode log. Its outputs are reused below.
+      - name: Compile Kotlin
+        working-directory: ios
+        run: ./gradlew :shared:compileKotlinIosArm64 --stacktrace
 
       - name: Build app (unsigned)
         run: |
           xcodebuild \
-            -project iosApp/iosApp.xcodeproj \
+            -project ios/iosApp/iosApp.xcodeproj \
             -scheme iosApp \
             -configuration Release \
             -sdk iphoneos \

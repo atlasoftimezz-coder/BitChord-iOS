@@ -43,7 +43,7 @@ keystore.properties
 AGENTS.md
 
 # iOS
-iosApp/iosApp.xcodeproj/
+ios/iosApp/iosApp.xcodeproj/
 build/
 .kotlin/
 dist/
