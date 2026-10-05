@@ -9,6 +9,10 @@ import platform.Foundation.NSURL
 import platform.Foundation.NSURLSession
 import platform.Foundation.NSURLSessionConfiguration
 import platform.Foundation.create
+import platform.Foundation.dataTaskWithRequest
+import platform.Foundation.setHTTPBody
+import platform.Foundation.setHTTPMethod
+import platform.Foundation.setValue
 import platform.posix.memcpy
 import platform.darwin.DISPATCH_TIME_FOREVER
 import platform.darwin.dispatch_semaphore_create
@@ -54,12 +58,12 @@ actual fun httpExecuteAsync(
         return
     }
     val request = NSMutableURLRequest(uRL = nsUrl)
-    request.HTTPMethod = method
-    request.timeoutInterval = timeoutMs / 1000.0
+    request.setHTTPMethod(method)
+    request.setTimeoutInterval(timeoutMs / 1000.0)
     headers.forEach { (name, value) -> request.setValue(value, forHTTPHeaderField = name) }
     if (body != null) {
         contentType?.let { request.setValue(it, forHTTPHeaderField = "Content-Type") }
-        request.HTTPBody = body.toNSData()
+        request.setHTTPBody(body.toNSData())
     }
     session.dataTaskWithRequest(request) { data, response, error ->
         if (error != null) {

@@ -29,7 +29,8 @@ abstract class Node internal constructor(val nodeType: Short) {
 
 class NodeList internal constructor(private val nodes: List<Node>) {
     val length: Int get() = nodes.size
-    fun item(index: Int): Node? = nodes.getOrNull(index)
+    /** Like the DOM: in range is the caller's job (loops run to [length]). */
+    fun item(index: Int): Node = nodes[index]
 }
 
 class Attr internal constructor(private val name: String, private val value: String) : Node(ATTRIBUTE_NODE) {
