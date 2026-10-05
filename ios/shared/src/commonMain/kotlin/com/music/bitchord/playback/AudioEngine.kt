@@ -89,6 +89,12 @@ interface AudioEngine {
     /** Stop and empty the other deck — an armed standby or a tail — and reset its volume and filters. */
     fun releaseOtherDeck()
 
+    /**
+     * The listener's speed (0.5–2, pitch kept). Applies to both decks and
+     * multiplies any beatmatch rate, as on Android.
+     */
+    fun setPlaybackSpeed(speed: Float)
+
     /** Playback rate of the current deck; back to 1 once a beatmatched blend is over. */
     fun setCurrentRate(rate: Float)
 }

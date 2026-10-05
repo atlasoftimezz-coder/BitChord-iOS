@@ -62,8 +62,14 @@ ios/                 standalone Gradle build for iOS (Kotlin 2.4.20, Compose Mul
 | P3 | Lyrics: all providers, word-synced panel, translation and romanization, provider picker | Built 2026-10-05 13:20, **not yet confirmed by user** |
 | P4 | Google sign-in (WKWebView, Safari user agent), Keychain session, Home feed, Library (liked songs, library songs, playlists/albums/artists), album/playlist/artist pages with Play and Shuffle, Like button, tabs | Built 2026-10-05 15:01, **not yet tested by user** |
 | P5 | Downloads (queue, 3 workers, batch bar, album/playlist Download), offline playback with stream fallback, lyrics `.lrc` sidecar + EmbeddedLyrics, Files-app import ("On this device") | Built 2026-10-05 15:54, **not yet tested by user** |
-| P6 | Automix (beat-matching DJ transitions) and AI (ONNX beat detection, vocal separation) | Todo |
-| P7 | Everything else (list below) and porting the real BitChord UI | Todo |
+| P6 | Crossfade and Automix: second AVPlayer deck, ported CrossfadeController (filter sweep, bass swap, vocal separation), C++ analyzer and the Beat This! / open-unmix ONNX models on iOS | Built 2026-10-05, **compile status: see "Next step"; not tested by user** |
+| P7a | Settings screen (Library → gear), playback speed 0.5–2×, sleep timer (minutes / end of song) | In progress |
+| P7b | History and search history, replay/stats | Todo |
+| P7c | Scrobbling (Last.fm, ListenBrainz), Discord Rich Presence | Todo |
+| P7d | Animated album canvas | Todo |
+| P7e | Pluggable sources, PoToken, multiple accounts / brand channels, quality options | Todo |
+| P7f | Listen Together | Todo |
+| P7g | Port of the real BitChord UI (MainActivity, NowPlayingScreen, screens in `ios/parked/`) | Todo |
 
 ### Open user feedback
 
@@ -140,40 +146,30 @@ Full parity with the Android README. Each item's Android source is under `app/sr
 - **Strings:** `R.string.x` is the English text itself. Regenerate it with `python ios/tools/gen_strings.py` after upstream changes.
 - **Playback architecture:** Kotlin `PlayerController` (queue, resolve, retries) drives the Swift `AudioEngine` through the Kotlin `AudioEngine` interface. Streams are AAC/MP4 from InnerTubeX (`StreamResolver.kt`). InnerTubeX v0.7.4 iOS klibs come from JitPack; they require Kotlin ≥ 2.4.10.
 
-## P6 plan (researched 2026-10-05; no code written yet)
+## How P6 works on iOS
 
-**Engine: dual AVPlayer decks, not AVAudioEngine.** AVAudioEngine cannot stream HTTP without a custom decoder. The Android CrossfadeController is tick-driven anyway (30 ms gain and filter steps, position-based), so two AVQueuePlayers are a faithful port.
-- Swift `AudioEngine` gets an active deck and a standby deck. The Kotlin interface gains:
-  - `armStandby(url, headers, mime, len, chunk, startMs, rate)`: load silent and paused, seeked to the cue point.
-  - `standbyReady()`, `startStandby()` and `swapDecks()`. `swapDecks()` is the handoff: the standby becomes active, and the old deck keeps playing as the tail. Call `clearNext` on the tail so it does not advance.
-  - `setGains(active, other)`, `setFilters(lpA, hpA, lpB, hpB)`, `stopTail()` and `cancelStandby()`. Progress, remote commands and Now Playing must follow the active deck.
-- Gains: `AVPlayer.volume`. Beatmatch: `player.rate` with `item.audioTimePitchAlgorithm = .timeDomain`.
-- Filters: an `MTAudioProcessingTap` on `item.audioMix`, with a 24 dB/oct LP and HP (two cascaded biquads each). Load the `tracks` key first. If the tap cannot be made, fall back to gains only.
-- Port `CrossfadeController.kt` as-is in logic: phases IDLE/ARMING/FADING/BAILING, `rideFilters`/`rideBassSwap`/`rideFilterSweep`/`rideVocalSeparation`, sin/cos gains, all constants. Drive it from `PlayerController` instead of ExoPlayer. Skip sleep-fade and party.
+- **Engine:** `AudioEngine.swift` has two `AVQueuePlayer` decks. `player` is current: it drives progress, Now Playing and the remote commands. `other` holds either an armed standby (the incoming track, silent, seeked to the cue point) or, after `handoffToStandby()`, the tail of the outgoing track. The Kotlin `AudioEngine` interface has a "second deck" section listing the calls.
+- **Filters:** `TransitionFilter.swift` is a port of Android's `TransitionFilterProcessor` (24 dB/oct LP + HP, glided cutoffs). It runs as an `MTAudioProcessingTap` on the item's audio mix and is attached lazily, the first time a transition asks for a non-open filter. Playback without transitions never has a tap.
+- **Controller:** `playback/CrossfadeController.kt` is Android's logic with the same constants. Phases are IDLE/ARMING/FADING/BAILING; there is no sleep fade or party mode.
+  - The standby is loaded from `PlayerController.queuedStream`, the gapless pre-resolve of the next track.
+  - At the handoff, `PlayerController.handedOff()` advances the queue.
+- **Analysis:**
+  - Ported unchanged: `playback/smart/` TransitionPlanner, TransitionPolicy, TrackAnalysis, AnalysisStore, TrackFeatures.parse and the BeatTracker post-processing.
+  - `TrackAnalyzer.kt` is iOS-native. Its audio source is the downloaded or imported file, or for a streamed track a one-off fetch into `Caches/analysis/`, deleted afterwards. Results persist in `Application Support/smart_analysis`.
+- **Native:** `native/analyzer/*.cpp` is compiled into the app (project.yml `sources`). `iosApp/Analysis/BitChordAnalysis.{h,cpp}` is the C bridge and replaces the JNI files; it is exposed to Swift through `iosApp-Bridging-Header.h`.
+  - `iosApp/Analysis/AnalysisBridge.swift` implements Kotlin's `NativeAnalysis`: decode with AVAudioFile, resample, then mel + Beat This! and STFT + open-unmix on ONNX Runtime.
+  - ONNX Runtime comes from SPM `onnxruntime-swift-package-manager` 1.20.0, Swift `import OnnxRuntimeBindings`.
+  - Both `.onnx` files are bundled from `app/src/main/assets`.
+- **UI:** Now Playing has Automix and Crossfade chips and an analysis status line. Settings (P7a) has the full controls.
 
-**Analysis:** `native/analyzer/*.cpp` is plain C++17 with only std includes. Compile it into iosApp via XcodeGen sources `../../native/analyzer`, with `HEADER_SEARCH_PATHS $(SRCROOT)/../../native`, c++17, plus a C wrapper and a bridging header. Reuse `app/src/main/cpp/jni/analysis_jni.cpp`'s JSON writer.
-- A Kotlin `NativeAnalysis` interface is implemented in Swift. Keep big buffers on the Swift side:
-  - `analyzeFeatures(path, duration)`: decode mono with AVAudioFile, `Resample` to 11025, `AnalyzeAudio`, return JSON. Parse it with the ported `TrackFeatures.parse`.
-  - `beatLogits(path, start, end)`: mono, resample to 22050, `ComputeBeatSpectrogram`, ORT in 1500-frame chunks with a 6-frame border, return beat and downbeat logits plus the actual start. Port the `BeatTracker.track` post-processing (pickPeaks, tempo, confidence) in Kotlin.
-  - `vocalCurve(path, start, end)`: stereo at 44100, `ComputeVocalSpectrogram`, zero-pad to 960 frames, ORT, then `reduceToBandCurve` (200–4000 Hz) in Swift.
-- ONNX: SPM `https://github.com/microsoft/onnxruntime-swift-package-manager` from 1.24.2, product `onnxruntime`, Swift `import OnnxRuntimeBindings`. API:
-  - `ORTEnv(loggingLevel:)`
-  - `ORTSession(env:modelPath:sessionOptions:)`
-  - `ORTValue(tensorData:elementType:.float,shape:)`
-  - `run(withInputs:outputNames:runOptions:)`
-  - `tensorData()`
-  - `inputNames()`
-- Models: bundle `app/src/main/assets/beat_this_int8.onnx` (4.3 MB) and `vocals_umxhq_int8.onnx` (8.6 MB) as resources.
-- Pure Kotlin files to port unchanged:
-  - `smart/TransitionPlanner.kt`, `TransitionPolicy.kt` and `TrackAnalysis.kt`
-  - `TrackFeatures.parse`
-  - `AnalysisStore.kt` (Context/File shims)
-  - Add to iOS AppSettings: `crossfadeSeconds`, `smartFadeEnabled`, `automixPerformanceMode`, `smartMixInProgress`, `smartAnalysis`, `smartTransitionWindow`, `SmartAnalysis`, `TrackAnalysisState`, `TransitionWindow`.
-- `TrackAnalyzer`: a simplified port. Source file:
-  - Downloaded or imported tracks: the existing file.
-  - Streamed tracks: fetch the m4a to `Caches/analysis/<id>.m4a` with `Downloader`, then delete it after analysis.
-  - Run the whole-track features, then the head and tail windows (`BeatTracker.WINDOW_SECONDS`), then merge exactly as `TrackAnalyzer.analyze` does. Persist through AnalysisStore.
-- UI: Automix toggle and crossfade-seconds slider in Now Playing or Library. The full Settings screen stays in P7.
+## P7 plan
+
+P7 is split into P7a–P7g (table above), one CI build and one phone test each. P7g is last because the ported UI calls into everything else.
+
+**P7a (in progress):** `ui/SettingsScreen.kt`, `playback/SleepTimer.kt` (ported) and `AppSettings.playbackSpeed`.
+- Speed: `AudioEngine.setPlaybackSpeed`. Every item uses `.spectral` pitch keeping, and the current deck plays at speed × beatmatch rate.
+- Sleep timer: the deadline is handled in `PlayerController`. "End of song" drops the gapless next and suppresses crossfades.
+- Not done: skip silence and the in-app equalizer. Both need sample access on the main deck: grow `TransitionFilter`'s tap into a small DSP chain (EQ biquads, silence detection). Planned as the rest of P7a.
 
 ## Gotchas (all hit and solved)
 
@@ -183,11 +179,13 @@ Full parity with the Android README. Each item's Android source is under `app/sr
 - NSURLRequest/NSURLSession category methods (`setHTTPMethod`, `setValue:forHTTPHeaderField:`, `dataTaskWithRequest:completionHandler:`) need explicit `platform.Foundation.*` imports. So do NSLocale `preferredLanguages` and NSTimeZone `localTimeZone`.
 - A Kotlin class named `Context` is exported to Swift and clashes with SwiftUI's `Context`. Swift code uses `UIViewControllerRepresentableContext<…>`.
 - A Kotlin class named `URL` is exported via Shared: Swift files that `import Shared` must write `Foundation.URL` in type positions.
-- `fix_ported.py` rewrites `ByteArrayOutputStream.toByteArray()` to `encodeToByteArray()` (wrong), and leaves `Charsets.*` alone (no shim). Check ported byte-handling code by hand.
+- `fix_ported.py` rewrites *every* bare `.toByteArray()` to `.encodeToByteArray()`, including on streams, and it re-runs over all ported files each time. `ByteArrayOutputStream` therefore has an `encodeToByteArray()` member in the shim. `Charsets.*` has no shim: replace it by hand (see EmbeddedLyrics).
+- The Bash tool's heredocs choke on some Python edit scripts (quotes, `\\.` key paths). Write the script to the scratchpad with Write and run `python <file>`.
 - **On this PC, the Bash tool's heredocs and `python -c` strings eat backslashes.** Write any file containing `\` with the Write tool, or build the character with `chr(92)`.
 - The PC's Windows drive C: is nearly full (about 7 GB free). Keep everything on D:.
 
 ## Next step
 
-1. Get the user's test results for P3 (lyrics), P4 (sign-in, Home, Library, likes) and P5 (downloads, offline, Files import), and fix anything broken.
-2. Then start **P6 (Automix + AI)** following "P6 plan" above, keeping to that phase's scope. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
+1. Check the latest CI run (`gh run list -R atlasoftimezz-coder/BitChord-iOS --limit 3`). P6 and P7a compile fixes come first if it is red. The Swift side of P6 (MTAudioProcessingTap callback types, ONNX Runtime Swift API, C++ linking) has not been through Xcode yet.
+2. Get the user's test results for P3, P4, P5, P6 and P7a, and fix what is broken.
+3. Finish P7a (equalizer, skip silence), then P7b. One sub-phase at a time. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).

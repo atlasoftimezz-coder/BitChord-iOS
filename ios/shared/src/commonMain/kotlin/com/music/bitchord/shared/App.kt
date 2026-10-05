@@ -44,6 +44,7 @@ import com.music.bitchord.ui.DeviceScreen
 import com.music.bitchord.ui.DownloadIcon
 import com.music.bitchord.ui.DownloadSessionBar
 import com.music.bitchord.ui.DownloadsScreen
+import com.music.bitchord.ui.SettingsScreen
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.TrackAnalysisState
@@ -118,6 +119,7 @@ fun App(engine: AudioEngine) {
     var signInOpen by remember { mutableStateOf(false) }
     var downloadsOpen by remember { mutableStateOf(false) }
     var deviceOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var lastCrash by remember { mutableStateOf(takeLastCrash()) }
     val clipboard = LocalClipboardManager.current
 
@@ -152,11 +154,13 @@ fun App(engine: AudioEngine) {
                                 onSignOut = accounts::signOut,
                                 onDownloads = { downloadsOpen = true },
                                 onDevice = { deviceOpen = true },
+                                onSettings = { settingsOpen = true },
                             )
                         }
                         pages.lastOrNull()?.let { page -> PageScreen(page, library, player) }
                         if (deviceOpen) DeviceScreen(player, onClose = { deviceOpen = false })
                         if (downloadsOpen) DownloadsScreen(player, onClose = { downloadsOpen = false })
+                        if (settingsOpen) SettingsScreen(onClose = { settingsOpen = false })
                     }
                     DownloadSessionBar(onOpen = { downloadsOpen = true })
                     MiniPlayer(player, onOpen = { nowPlayingOpen = true })
@@ -167,11 +171,12 @@ fun App(engine: AudioEngine) {
                             Triple("Library", Icons.Filled.LibraryMusic, 2),
                         ).forEach { (label, icon, index) ->
                             NavigationBarItem(
-                                selected = tab == index && pages.isEmpty() && !downloadsOpen && !deviceOpen,
+                                selected = tab == index && pages.isEmpty() && !downloadsOpen && !deviceOpen && !settingsOpen,
                                 onClick = {
                                     while (library.closePage()) Unit
                                     downloadsOpen = false
                                     deviceOpen = false
+                                    settingsOpen = false
                                     tab = index
                                 },
                                 icon = { Icon(icon, contentDescription = label) },

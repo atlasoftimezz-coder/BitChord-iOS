@@ -6,6 +6,10 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.platform.FileSystem
+import com.music.bitchord.platform.elapsedMillis
+import com.music.bitchord.data.settings.AppSettings
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import com.music.bitchord.playback.smart.TrackAnalyzer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -70,6 +74,24 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
     init {
         engine.setListener(this)
         crossfade.start()
+        scope.launch { AppSettings.playbackSpeed.collect { engine.setPlaybackSpeed(it.coerceIn(0.5f, 2f)) } }
+        // A timed sleep timer: pause when the deadline passes (it is a deadline, so nothing has to tick).
+        scope.launch {
+            SleepTimer.deadline.collectLatest { deadline ->
+                if (deadline == null) return@collectLatest
+                delay((deadline - elapsedMillis()).coerceAtLeast(0L))
+                if (SleepTimer.deadline.value == deadline) {
+                    SleepTimer.cancel()
+                    engine.pause()
+                }
+            }
+        }
+        // "End of track": nothing may be queued gaplessly after the current track, or it would play on.
+        scope.launch {
+            SleepTimer.afterTrack.collect { armed ->
+                if (armed) dropQueued() else if (currentStream != null && queuedStream == null) prefetchNext()
+            }
+        }
         // Off the cold-start path: the first tap on a track is rarely sooner than two seconds.
         StreamResolver.warm()
     }
@@ -163,6 +185,7 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
     /** Resolve the following track now and queue it in the engine. */
     private fun prefetchNext() {
         prefetchJob?.cancel()
+        if (SleepTimer.afterTrack.value) return
         val s = _state.value
         val nextSong = s.queue.getOrNull(s.index + 1) ?: return
         val expectedIndex = s.index
@@ -281,6 +304,11 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
 
     override fun onEnded() {
         crossfade.onTrackChangedUnderneath()
+        if (SleepTimer.afterTrack.value) {
+            SleepTimer.cancel()
+            _state.update { it.copy(isPlaying = false, positionMs = 0) }
+            return
+        }
         if (_state.value.hasNext) next() else _state.update { it.copy(isPlaying = false, positionMs = 0) }
     }
 

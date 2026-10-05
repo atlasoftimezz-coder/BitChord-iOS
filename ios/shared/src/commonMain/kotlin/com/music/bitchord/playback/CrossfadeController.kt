@@ -154,6 +154,8 @@ class CrossfadeController(
 
     private fun considerAutoTransition() {
         if (!host.isPlaying) return
+        // The sleep timer ends playback with this track; there is nothing to blend into.
+        if (SleepTimer.afterTrack.value) return
         val current = host.current ?: return
         val next = host.next
         if (next == null) {

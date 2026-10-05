@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -217,17 +218,21 @@ fun LibraryTab(
     onSignOut: () -> Unit,
     onDownloads: () -> Unit,
     onDevice: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     if (!signedIn) {
         // Downloads and imported files need no account, and are what works offline.
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
-                Text(
-                    "Library",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Library",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
+                }
             }
             item { OfflineEntries(onDownloads, onDevice) }
             item {
@@ -250,6 +255,7 @@ fun LibraryTab(
                     Text(account?.name ?: "Library", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     account?.email?.takeIf { it.isNotBlank() }?.let { Text(it, color = Gray, maxLines = 1) }
                 }
+                IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
                 OutlinedButton(onClick = onSignOut) { Text("Sign out") }
             }
         }

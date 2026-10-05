@@ -55,6 +55,10 @@ object AppSettings {
     /** Whether third-party lyric services may be asked at all (also gates lyrics saved with downloads). */
     val syncedLyrics = boolean("synced_lyrics", true)
 
+    /** Playback speed, 0.5x–2x, pitch kept. */
+    val playbackSpeed = MutableStateFlow(KeyValueStore.getString("playback_speed")?.toFloatOrNull() ?: 1f)
+        .also { flow -> persist(flow) { KeyValueStore.putString("playback_speed", it.toString()) } }
+
     /** Fixed crossfade length in seconds; 0 is off. Also Automix's fallback while a pair is unanalysed. */
     val crossfadeSeconds = int("crossfade_seconds", 0)
 

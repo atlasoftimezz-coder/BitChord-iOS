@@ -30,6 +30,8 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     private var tailItem: AVPlayerItem?
     private var tailEnded = false
     private var currentRate: Float = 1
+    /// The listener's speed; the current deck plays at `baseSpeed * currentRate`.
+    private var baseSpeed: Float = 1
     /// Filters per item, attached when a transition first asks for one.
     private var filters: [ObjectIdentifier: TransitionFilter] = [:]
     private var timeObservers: [(AVQueuePlayer, Any)] = []
@@ -120,6 +122,21 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         becomeCurrent(item)
         player.insert(item, after: nil)
         player.play()
+        applyRate()
+    }
+
+    /// Plays the current deck at `baseSpeed * currentRate` (only while playing:
+    /// setting a non-zero rate on a paused AVPlayer would start it).
+    private func applyRate() {
+        let rate = baseSpeed * currentRate
+        if #available(iOS 16.0, *) { player.defaultRate = rate }
+        if player.rate != 0 && player.rate != rate { player.rate = rate }
+    }
+
+    func setPlaybackSpeed(speed: Float) {
+        baseSpeed = min(max(speed, 0.5), 2)
+        applyRate()
+        if isTailPlaying(), other.rate != 0 { other.rate = baseSpeed }
     }
 
     func setNext(url: String, headers: [String: String], mimeType: String, contentLength: Int64, chunkBytes: Int64) {
@@ -153,7 +170,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
         player.play()
-        if currentRate != 1 { player.rate = currentRate }
+        applyRate()
         if isTailPlaying() { other.play() }
         reportProgress()
     }
@@ -244,8 +261,6 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         releaseOtherDeck()
         guard let item = makeItem(url: url, headers: headers, mimeType: mimeType,
                                   contentLength: contentLength, chunkBytes: chunkBytes) else { return }
-        // Beatmatching stretches tempo; keep the pitch.
-        item.audioTimePitchAlgorithm = .timeDomain
         standbyItem = item
         standbyReady = false
         standbyRate = rate > 0 ? rate : 1
@@ -297,7 +312,8 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         currentRate = standbyRate
         becomeCurrent(incoming)
         try? AVAudioSession.sharedInstance().setActive(true)
-        player.playImmediately(atRate: standbyRate)
+        player.playImmediately(atRate: baseSpeed * standbyRate)
+        applyRate()
         reportProgress()
         updateNowPlayingTiming()
     }
@@ -355,7 +371,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
 
     func setCurrentRate(rate: Float) {
         currentRate = rate > 0 ? rate : 1
-        if player.rate != 0 { player.rate = currentRate }
+        applyRate()
     }
 
     // MARK: - Items
@@ -367,6 +383,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         if source.isFileURL {
             let item = AVPlayerItem(asset: AVURLAsset(url: source))
             item.preferredForwardBufferDuration = 30
+            item.audioTimePitchAlgorithm = .spectral
             return item
         }
         let loader = ChunkedResourceLoader(
@@ -380,6 +397,8 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         asset.resourceLoader.setDelegate(loader, queue: loader.queue)
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 30
+        // Speed and beatmatch changes keep the pitch.
+        item.audioTimePitchAlgorithm = .spectral
         loader.onHTTPError = { [weak self, weak item] status in
             DispatchQueue.main.async {
                 // Only the playing item's refusal is actionable; a queued one is
