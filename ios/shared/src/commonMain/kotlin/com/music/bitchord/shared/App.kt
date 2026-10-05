@@ -68,6 +68,7 @@ import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.playback.AudioEngine
 import com.music.bitchord.playback.PlayerController
+import com.music.bitchord.playback.largeArtwork
 import com.music.bitchord.ui.SearchViewModel
 
 /** Root of the iOS app. P1: search YouTube Music and play. */
@@ -370,10 +371,6 @@ private fun NowPlaying(player: PlayerController, onClose: () -> Unit) {
         }
     }
 }
-
-/** YouTube Music thumbnails carry their size in the URL (`=w120-h120`); ask for a big one. */
-private fun largeArtwork(url: String): String =
-    url.replace(Regex("=w\\d+-h\\d+"), "=w720-h720")
 
 private fun formatTime(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
