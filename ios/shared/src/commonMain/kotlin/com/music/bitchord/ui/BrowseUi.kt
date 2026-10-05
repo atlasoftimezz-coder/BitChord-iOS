@@ -54,6 +54,7 @@ import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.download.DownloadTarget
 import com.music.bitchord.playback.PlayerController
 
 private val Gray = Color(0xFF9A9AA2)
@@ -111,7 +112,7 @@ private fun ShelfCard(item: ShelfItem, onClick: () -> Unit) {
 @Composable
 fun TrackRow(song: Song, isCurrent: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Artwork(song.thumbnailUrl, Modifier.size(52.dp))
@@ -132,6 +133,7 @@ fun TrackRow(song: Song, isCurrent: Boolean, onClick: () -> Unit) {
                 color = Gray,
             )
         }
+        DownloadIcon(song)
     }
 }
 
@@ -213,13 +215,27 @@ fun LibraryTab(
     account: Account?,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
+    onDownloads: () -> Unit,
+    onDevice: () -> Unit,
 ) {
     if (!signedIn) {
-        Centered {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Your library lives in your YouTube Music account.", color = Gray)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onSignIn) { Text("Sign in") }
+        // Downloads and imported files need no account, and are what works offline.
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item {
+                Text(
+                    "Library",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+            item { OfflineEntries(onDownloads, onDevice) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Your playlists and likes live in your YouTube Music account.", color = Gray)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onSignIn) { Text("Sign in") }
+                }
             }
         }
         return
@@ -237,6 +253,7 @@ fun LibraryTab(
                 OutlinedButton(onClick = onSignOut) { Text("Sign out") }
             }
         }
+        item { OfflineEntries(onDownloads, onDevice) }
         when (val state = library) {
             is Load.Loading -> item { Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) { CircularProgressIndicator() } }
             is Load.Failed -> item {
@@ -330,6 +347,17 @@ fun PageScreen(page: LibraryViewModel.Page, vm: LibraryViewModel, player: Player
                                 Text("Shuffle")
                             }
                         }
+                        Spacer(Modifier.height(8.dp))
+                        CollectionDownloadButton(
+                            DownloadTarget(
+                                id = page.browseId,
+                                title = page.title,
+                                subtitle = page.subtitle,
+                                thumbnailUrl = page.thumbnailUrl,
+                                playlist = !page.browseId.startsWith("MPRE") && !page.browseId.startsWith("UC"),
+                            ),
+                            page.songs,
+                        )
                     }
                 }
             }

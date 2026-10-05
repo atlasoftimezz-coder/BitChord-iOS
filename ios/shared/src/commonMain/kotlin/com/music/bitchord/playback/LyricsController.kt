@@ -1,5 +1,8 @@
 package com.music.bitchord.playback
 
+import android.content.Context
+import com.music.bitchord.data.lyrics.EmbeddedLyrics
+import com.music.bitchord.download.Downloads
 import com.music.bitchord.data.lyrics.LyricLine
 import com.music.bitchord.data.lyrics.LyricsRepository
 import com.music.bitchord.data.lyrics.LyricsSource
@@ -76,7 +79,19 @@ class LyricsController(private val player: PlayerController) {
         request = next
         val gen = ++generation
         _state.value = State(videoId = next.videoId)
+        val localUri = player.state.value.current?.takeIf { it.videoId == next.videoId }?.localUri
+            ?: Downloads.verifiedSavedUri(next.videoId)
         job = scope.launch {
+            // A downloaded or imported track carries its own lyrics (saved
+            // beside it, or in its tags): no network, and they work offline.
+            if (localUri != null) {
+                val embedded = EmbeddedLyrics.forUri(Context.app, localUri)
+                if (gen != generation) return@launch
+                if (embedded != null) {
+                    _state.update { it.copy(lines = embedded, source = null, checked = true) }
+                    return@launch
+                }
+            }
             val found = LyricsRepository.lyrics(
                 videoId = next.videoId,
                 title = next.title,

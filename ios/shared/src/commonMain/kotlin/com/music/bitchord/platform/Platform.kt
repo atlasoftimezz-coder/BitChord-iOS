@@ -91,6 +91,8 @@ expect object FileSystem {
     fun list(path: String): List<String>
     fun read(path: String): ByteArray?
     fun write(path: String, bytes: ByteArray): Boolean
+    /** Adds [bytes] to the end of [path], creating it if missing; for streaming downloads to disk. */
+    fun append(path: String, bytes: ByteArray): Boolean
     fun tempDirectory(): String
     fun cachesDirectory(): String
     fun filesDirectory(): String
@@ -104,3 +106,12 @@ expect fun unicodeNormalize(text: String, form: String): String
 
 /** The device time zone's offset from UTC, in seconds, at [epochMs]. */
 expect fun utcOffsetSeconds(epochMs: Long): Int
+
+/**
+ * Ask the OS for time to finish work after the app leaves the foreground (a
+ * download batch). Returns a token for [endBackgroundWork]. iOS grants about
+ * 30 seconds; when audio is playing the app keeps running regardless.
+ */
+expect fun beginBackgroundWork(name: String): Long
+
+expect fun endBackgroundWork(token: Long)

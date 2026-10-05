@@ -169,8 +169,17 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
         // will come along to do it.
         updateNowPlayingTiming()
 
-        guard let artworkUrl, let url = URL(string: artworkUrl) else { return }
+        guard let artworkUrl else { return }
         let expectedTitle = title
+        // Offline artwork is a plain path (downloads and imports keep covers on disk).
+        if artworkUrl.hasPrefix("/") {
+            if let image = UIImage(contentsOfFile: artworkUrl) {
+                nowPlaying[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlaying
+            }
+            return
+        }
+        guard let url = URL(string: artworkUrl) else { return }
         artworkTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
             guard let data, let image = UIImage(data: data) else { return }
             DispatchQueue.main.async {
@@ -194,6 +203,12 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     private func makeItem(url: String, headers: [String: String], mimeType: String,
                           contentLength: Int64, chunkBytes: Int64) -> AVPlayerItem? {
         guard let source = URL(string: url) else { return nil }
+        // A downloaded or imported file: AVFoundation reads it directly.
+        if source.isFileURL {
+            let item = AVPlayerItem(asset: AVURLAsset(url: source))
+            item.preferredForwardBufferDuration = 30
+            return item
+        }
         let loader = ChunkedResourceLoader(
             source: source,
             headers: headers,

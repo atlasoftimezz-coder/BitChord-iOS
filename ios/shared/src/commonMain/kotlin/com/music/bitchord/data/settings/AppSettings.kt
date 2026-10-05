@@ -52,6 +52,9 @@ object AppSettings {
     /** Keep looking for word-synced lyrics after a line-synced answer arrives. */
     val prioritizeSyllableSync = boolean("prioritize_syllable_sync", false)
 
+    /** Whether third-party lyric services may be asked at all (also gates lyrics saved with downloads). */
+    val syncedLyrics = boolean("synced_lyrics", true)
+
     /** User-issued credential required by api.paxsenix.org. */
     val paxSenixApiKey = string("paxsenix_api_key", "")
 

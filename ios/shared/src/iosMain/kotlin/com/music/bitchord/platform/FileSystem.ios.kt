@@ -1,6 +1,11 @@
 package com.music.bitchord.platform
 
 import kotlinx.cinterop.BooleanVar
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
+import platform.posix.fclose
+import platform.posix.fopen
+import platform.posix.fwrite
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
@@ -73,6 +78,17 @@ actual object FileSystem {
     actual fun write(path: String, bytes: ByteArray): Boolean {
         path.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }?.let(::mkdirs)
         return bytes.toNSData().writeToFile(path, atomically = true)
+    }
+
+    actual fun append(path: String, bytes: ByteArray): Boolean {
+        path.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }?.let(::mkdirs)
+        val file = fopen(path, "ab") ?: return false
+        return try {
+            if (bytes.isEmpty()) true
+            else bytes.usePinned { pinned -> fwrite(pinned.addressOf(0), 1uL, bytes.size.toULong(), file) == bytes.size.toULong() }
+        } finally {
+            fclose(file)
+        }
     }
 
     actual fun tempDirectory(): String = NSTemporaryDirectory().trimEnd('/')

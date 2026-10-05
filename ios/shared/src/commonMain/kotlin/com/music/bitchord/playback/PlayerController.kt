@@ -3,6 +3,9 @@ package com.music.bitchord.playback
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.download.DownloadStore
+import com.music.bitchord.download.Downloads
+import com.music.bitchord.platform.FileSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -112,13 +115,16 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         }
     }
 
-    /** @return true once [song] is handed to the engine. */
-    private suspend fun startStream(song: Song): Boolean {
+    /**
+     * @param allowLocal false after a downloaded file failed to play, to stream it instead.
+     * @return true once [song] is handed to the engine.
+     */
+    private suspend fun startStream(song: Song, allowLocal: Boolean = true): Boolean {
         try {
-            val stream = StreamResolver.resolve(song.videoId)
+            val stream = (if (allowLocal) localStream(song) else null) ?: StreamResolver.resolve(song.videoId)
             if (_state.value.current?.videoId != song.videoId) return false
             currentStream = stream
-            _state.update { it.copy(streamInfo = describe(stream)) }
+            _state.update { it.copy(streamInfo = describe(stream, song)) }
             engine.play(
                 url = stream.url,
                 headers = stream.headers,
@@ -144,7 +150,7 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         val expectedIndex = s.index
         prefetchJob = scope.launch {
             try {
-                val stream = StreamResolver.resolve(nextSong.videoId)
+                val stream = localStream(nextSong) ?: StreamResolver.resolve(nextSong.videoId)
                 // The queue moved on while this was resolving.
                 if (_state.value.index != expectedIndex || _state.value.queue.getOrNull(expectedIndex + 1) != nextSong) {
                     return@launch
@@ -181,7 +187,36 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         engine.setQueueCapabilities(hasNext = s.hasNext, hasPrevious = true)
     }
 
-    private fun describe(stream: StreamResolver.Stream): String {
+    /**
+     * The file to play instead of streaming: an imported track's own file, or
+     * the download of a YouTube track. Null means stream it. An imported track
+     * has nothing to stream, so a missing file is an error.
+     */
+    private fun localStream(song: Song): StreamResolver.Stream? {
+        val uri = song.localUri?.takeIf { uri -> DownloadStore.pathOf(uri)?.let(FileSystem::isFile) == true }
+            ?: Downloads.verifiedSavedUri(song.videoId)
+        if (uri == null) {
+            if (song.videoId.startsWith(Downloads.LOCAL_PREFIX)) error("This file is no longer on the device")
+            return null
+        }
+        return StreamResolver.Stream(
+            videoId = song.videoId,
+            url = uri,
+            kbps = 0,
+            mimeType = "",
+            contentLength = null,
+            headers = emptyMap(),
+            chunkBytes = 0,
+            loudnessDb = null,
+            profileId = LOCAL_PROFILE,
+        )
+    }
+
+    private fun describe(stream: StreamResolver.Stream, song: Song?): String {
+        if (stream.profileId == LOCAL_PROFILE) {
+            return if (song?.videoId?.startsWith(Downloads.LOCAL_PREFIX) == true) "On this device"
+            else "Downloaded" + (Downloads.offlineVersionOf(song ?: return "Downloaded")?.downloadFormat?.let { " · $it" } ?: "")
+        }
         val codec = when {
             "mp4a" in stream.mimeType -> "AAC"
             "opus" in stream.mimeType -> "Opus"
@@ -213,7 +248,7 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         currentStream = stream
         retriedRefusal = false
         _state.update {
-            it.copy(index = it.index + 1, positionMs = 0, durationMs = 0, error = null, streamInfo = describe(stream))
+            it.copy(index = it.index + 1, positionMs = 0, durationMs = 0, error = null, streamInfo = describe(stream, it.queue.getOrNull(it.index + 1)))
         }
         publishNowPlaying()
         prefetchNext()
@@ -223,9 +258,28 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         val stream = currentStream
         val song = _state.value.current
         Log.w(TAG, "playback error ($httpStatus): $message")
+        // A downloaded file that will not play (damaged, or deleted under us):
+        // stream the track instead, once.
+        if (stream?.profileId == LOCAL_PROFILE && song != null && !retriedRefusal &&
+            !song.videoId.startsWith(Downloads.LOCAL_PREFIX)
+        ) {
+            retriedRefusal = true
+            val resumeAt = _state.value.positionMs
+            loadJob?.cancel()
+            dropQueued()
+            loadJob = scope.launch {
+                if (startStream(song, allowLocal = false)) {
+                    if (resumeAt > 0) engine.seekTo(resumeAt)
+                    prefetchNext()
+                }
+            }
+            return
+        }
         // A URL that passed the probe can still be refused later; mint another
         // from a different client once before giving up, as the Android app does.
-        if (stream != null && song != null && httpStatus in setOf(403, 404, 410) && !retriedRefusal) {
+        if (stream != null && song != null && stream.profileId != LOCAL_PROFILE &&
+            httpStatus in setOf(403, 404, 410) && !retriedRefusal
+        ) {
             retriedRefusal = true
             val resumeAt = _state.value.positionMs
             loadJob?.cancel()
@@ -248,6 +302,9 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
 
     private companion object {
         const val TAG = "BitChord"
+
+        /** [StreamResolver.Stream.profileId] of a file on the device. */
+        const val LOCAL_PROFILE = "LOCAL"
     }
 }
 
