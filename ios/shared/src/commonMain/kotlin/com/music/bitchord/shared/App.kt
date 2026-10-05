@@ -73,7 +73,10 @@ import com.music.bitchord.data.model.Song
 import com.music.bitchord.platform.recentLog
 import com.music.bitchord.platform.takeLastCrash
 import com.music.bitchord.playback.AudioEngine
+import com.music.bitchord.playback.LyricsController
 import com.music.bitchord.playback.PlayerController
+import com.music.bitchord.ui.ToastHost
+import com.music.bitchord.ui.player.LyricsScreen
 import com.music.bitchord.playback.largeArtwork
 import com.music.bitchord.ui.SearchViewModel
 
@@ -82,7 +85,9 @@ import com.music.bitchord.ui.SearchViewModel
 fun App(engine: AudioEngine) {
     val player = remember { PlayerController(engine) }
     val search = remember { SearchViewModel() }
+    val lyricsController = remember { LyricsController(player) }
     var nowPlayingOpen by remember { mutableStateOf(false) }
+    var lyricsOpen by remember { mutableStateOf(false) }
     var lastCrash by remember { mutableStateOf(takeLastCrash()) }
     val clipboard = LocalClipboardManager.current
 
@@ -108,8 +113,12 @@ fun App(engine: AudioEngine) {
                     MiniPlayer(player, onOpen = { nowPlayingOpen = true })
                 }
                 if (nowPlayingOpen) {
-                    NowPlaying(player, onClose = { nowPlayingOpen = false })
+                    NowPlaying(player, onClose = { nowPlayingOpen = false }, onOpenLyrics = { lyricsOpen = true })
                 }
+                if (lyricsOpen) {
+                    LyricsScreen(player, lyricsController, onClose = { lyricsOpen = false })
+                }
+                ToastHost(Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
             }
         }
     }
@@ -333,7 +342,7 @@ private fun PlayPauseButton(state: PlayerController.State, player: PlayerControl
 }
 
 @Composable
-private fun NowPlaying(player: PlayerController, onClose: () -> Unit) {
+private fun NowPlaying(player: PlayerController, onClose: () -> Unit, onOpenLyrics: () -> Unit) {
     val state by player.state.collectAsState()
     val song = state.current
     var scrubbing by remember { mutableStateOf<Float?>(null) }
@@ -387,7 +396,8 @@ private fun NowPlaying(player: PlayerController, onClose: () -> Unit) {
                     Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(36.dp))
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onOpenLyrics) { Text("Lyrics") }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             state.streamInfo?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = Color.Gray) }
             val clipboard = LocalClipboardManager.current

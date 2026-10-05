@@ -27,6 +27,10 @@ kotlin {
     sourceSets {
         all {
             languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
+            languageSettings.optIn("kotlin.io.encoding.ExperimentalEncodingApi")
+            languageSettings.optIn("kotlin.uuid.ExperimentalUuidApi")
+            languageSettings.optIn("kotlin.concurrent.atomics.ExperimentalAtomicApi")
+            languageSettings.optIn("kotlin.time.ExperimentalTime")
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -47,6 +51,13 @@ kotlin {
 
             implementation("io.coil-kt.coil3:coil-compose:3.6.3")
             implementation("io.coil-kt.coil3:coil-network-ktor3:3.6.3")
+
+            // jsoup for KMP: same API, used by the Genius lyrics scraper.
+            implementation("com.fleeksoft.ksoup:ksoup:0.2.6")
+
+            // collectAsStateWithLifecycle / LocalLifecycleOwner, as on Android.
+            implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+            implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
         }
         iosMain.dependencies {
             implementation("io.ktor:ktor-client-darwin:3.5.2")
