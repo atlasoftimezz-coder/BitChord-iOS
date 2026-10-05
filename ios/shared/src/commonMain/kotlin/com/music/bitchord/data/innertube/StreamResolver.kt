@@ -13,6 +13,8 @@ import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.models.YouTubeLocale
 import com.music.bitchord.data.DebugLog as Log
+import com.music.bitchord.platform.AppCache
+import com.music.bitchord.platform.KeyValueStore
 import com.music.bitchord.platform.elapsedMillis
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -25,6 +27,12 @@ import io.ktor.http.Url
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.readByteArray
@@ -80,15 +88,23 @@ object StreamResolver {
         else Log.w(TAG, line)
     }
 
-    /** Player-config cache kept in memory for now; persisted in a later phase. */
+    /** Remote player-config cache, persisted like the Android app's SharedPreferences copy. */
     private val repository = object : PlayerConfigRepository {
         override val enabled: Boolean = true
         override val sourceUrl: String = PLAYER_CONFIG_URL
         override val defaultSourceUrl: String = PLAYER_CONFIG_URL
-        override var cachedJson: String = ""
-        override var cachedAtMs: Long = 0L
-        override var cachedSourceUrl: String = ""
-        override var cachedEtag: String = ""
+        override var cachedJson: String
+            get() = KeyValueStore.getString("itx_config_json").orEmpty()
+            set(value) = KeyValueStore.putString("itx_config_json", value)
+        override var cachedAtMs: Long
+            get() = KeyValueStore.getLong("itx_config_cached_at") ?: 0L
+            set(value) = KeyValueStore.putLong("itx_config_cached_at", value)
+        override var cachedSourceUrl: String
+            get() = KeyValueStore.getString("itx_config_source").orEmpty()
+            set(value) = KeyValueStore.putString("itx_config_source", value)
+        override var cachedEtag: String
+            get() = KeyValueStore.getString("itx_config_etag").orEmpty()
+            set(value) = KeyValueStore.putString("itx_config_etag", value)
     }
 
     private val innerTube = InnerTube(http, logger = logger)
@@ -100,6 +116,44 @@ object StreamResolver {
         innerTube = innerTube,
         logger = logger,
     )
+
+    private val warmScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var warmup: Job? = null
+
+    /**
+     * Pays the cold costs before a track needs them — the player config and
+     * the EJS cipher solve (seconds in QuickJS when the player is new) — and
+     * keeps preprocessed players on disk so a relaunch skips the solve. Same
+     * as the Android app's InnerTubeXResolver.warm, called shortly after launch.
+     */
+    fun warm(delayMs: Long = WARM_DELAY_MS) {
+        warmup?.cancel()
+        warmup = warmScope.launch {
+            delay(delayMs)
+            val start = elapsedMillis()
+            runCatching {
+                cipherService.setPreprocessedPlayerCache(::readPlayer, ::writePlayer)
+                innerTube.cookie = Innertube.cookie
+                innerTube.visitorData = Innertube.ensureVisitorData()
+                innerTube.locale = YouTubeLocale(gl = "US", hl = Innertube.currentLanguage)
+                extractor.prewarm()
+            }.onFailure { if (it is CancellationException) throw it }
+                .onFailure { Log.w(TAG, "InnerTubeX warm-up failed: ${it.message}") }
+                .onSuccess { Log.d(TAG, "InnerTubeX warmed in ${elapsedMillis() - start}ms") }
+        }
+    }
+
+    private fun readPlayer(key: String): String? = AppCache.read("$PLAYER_DIR/$key")?.decodeToString()
+
+    private fun writePlayer(key: String, value: String?) {
+        if (value == null) {
+            AppCache.delete("$PLAYER_DIR/$key")
+            return
+        }
+        AppCache.write("$PLAYER_DIR/$key", value.encodeToByteArray())
+        // Players rotate every few days; only the newest are worth their megabytes.
+        AppCache.list(PLAYER_DIR).drop(KEPT_PLAYERS).forEach { AppCache.delete("$PLAYER_DIR/$it") }
+    }
 
     /** Recently resolved streams; googlevideo URLs stay valid for hours. */
     private val recent = mutableMapOf<String, Pair<Stream, Long>>()
@@ -221,6 +275,9 @@ object StreamResolver {
     }
 
     private val REFUSAL_CODES = setOf(403, 404, 410)
+    private const val WARM_DELAY_MS = 2_000L
+    private const val PLAYER_DIR = "innertubex_players"
+    private const val KEPT_PLAYERS = 3
     private const val INNERTUBEX_ATTEMPTS = 3
     private const val AUTH_BOUNDARY_BYTES = 1024L * 1024
     private const val PROBE_READ_BYTES = 16L * 1024

@@ -53,6 +53,8 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
 
     init {
         engine.setListener(this)
+        // Off the cold-start path: the first tap on a track is rarely sooner than two seconds.
+        StreamResolver.warm()
     }
 
     fun playQueue(songs: List<Song>, startIndex: Int) {
