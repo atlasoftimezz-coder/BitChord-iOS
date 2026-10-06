@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -219,6 +221,7 @@ fun LibraryTab(
     onDownloads: () -> Unit,
     onDevice: () -> Unit,
     onSettings: () -> Unit,
+    onStats: () -> Unit,
 ) {
     if (!signedIn) {
         // Downloads and imported files need no account, and are what works offline.
@@ -235,6 +238,9 @@ fun LibraryTab(
                 }
             }
             item { OfflineEntries(onDownloads, onDevice) }
+        item { LibraryEntry("Your stats", "Top songs, artists and listening time", Icons.Filled.BarChart, onStats) }
+        item { LibraryEntry("History", "What you played, on any device", Icons.Filled.History) { vm.openHistory() } }
+            item { LibraryEntry("Your stats", "Top songs, artists and listening time", Icons.Filled.BarChart, onStats) }
             item {
                 Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Your playlists and likes live in your YouTube Music account.", color = Gray)

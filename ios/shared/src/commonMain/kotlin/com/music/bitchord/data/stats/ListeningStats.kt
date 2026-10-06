@@ -1,5 +1,9 @@
 package com.music.bitchord.data.stats
 
+import com.music.bitchord.compat.format
+import com.music.bitchord.compat.synchronized
+import kotlin.concurrent.Volatile
+import kotlinx.coroutines.IO
 import android.content.Context
 import android.util.Log
 import com.music.bitchord.data.model.Song
@@ -17,7 +21,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
-import java.util.Locale
 
 /**
  * What this device has listened to, kept on this device.
@@ -132,7 +135,7 @@ object ListeningStats {
         if (!ready) return
         if (playedMs <= 0 && !countsAsPlay) return
         if (song.videoId.isBlank()) return
-        val now = System.currentTimeMillis()
+        val now = com.music.bitchord.platform.epochMillis()
         val at = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault())
         synchronized(lock) {
             val bucket = bucketFor(YearMonth.from(at))
@@ -175,7 +178,7 @@ object ListeningStats {
                 // "Cheema Y & Gur Sidhu" gets a picture of nobody and a genre of
                 // nothing.
                 ArtistFacts.noticed(name)
-                val artist = bucket.artists.getOrPut(name.lowercase(Locale.ROOT)) {
+                val artist = bucket.artists.getOrPut(name.lowercase()) {
                     NameEntry(name = name, art = song.thumbnailUrl)
                 }
                 artist.ms += playedMs
@@ -450,7 +453,7 @@ object ListeningStats {
                 // instead of sitting beside them forever.
                 artists = stored.artists
                     .map { it.copy(name = primaryArtist(it.name) ?: it.name) }
-                    .mergedBy(LinkedHashMap()) { it.name.lowercase(Locale.ROOT) },
+                    .mergedBy(LinkedHashMap()) { it.name.lowercase() },
                 albums = stored.albums.mergedBy(LinkedHashMap()) { albumKey(it.name, it.sub.orEmpty()) },
                 hours = LongArray(24) { stored.hours.getOrElse(it) { 0L } },
                 days = stored.days.toMutableMap(),
@@ -473,7 +476,7 @@ object ListeningStats {
             }
             bucket.artists.forEach { entry ->
                 val lead = entry.copy(name = primaryArtist(entry.name) ?: entry.name)
-                artists.merge(lead.name.lowercase(Locale.ROOT), lead) { a, b -> a.also { it.absorb(b) } }
+                artists.merge(lead.name.lowercase(), lead) { a, b -> a.also { it.absorb(b) } }
             }
             bucket.albums.forEach { entry ->
                 val key = albumKey(entry.name, entry.sub.orEmpty())
@@ -596,7 +599,7 @@ object ListeningStats {
      * treated as a binary by every tool that looked at it.
      */
     private fun albumKey(name: String, artist: String): String =
-        name.lowercase(Locale.ROOT) + ALBUM_KEY_SEPARATOR + artist.lowercase(Locale.ROOT)
+        name.lowercase() + ALBUM_KEY_SEPARATOR + artist.lowercase()
 
     /** @see albumKey */
     private val ALBUM_KEY_SEPARATOR = Char(UNIT_SEPARATOR).toString()
@@ -758,8 +761,8 @@ enum class ReplayPeriod(val chip: String) {
     }
 
     fun label(today: LocalDate): String = when (this) {
-        THIS_MONTH -> YearMonth.from(today).month.name.lowercase(Locale.ROOT)
-            .replaceFirstChar { it.uppercase(Locale.ROOT) } + " ${today.year}"
+        THIS_MONTH -> YearMonth.from(today).month.name.lowercase()
+            .replaceFirstChar { it.uppercase() } + " ${today.year}"
         THIS_YEAR -> today.year.toString()
         ALL_TIME -> "All time"
     }

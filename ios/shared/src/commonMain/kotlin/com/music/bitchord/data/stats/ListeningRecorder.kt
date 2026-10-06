@@ -1,5 +1,6 @@
 package com.music.bitchord.data.stats
 
+import kotlinx.coroutines.IO
 import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
@@ -56,9 +57,9 @@ object ListeningRecorder {
      * runtime stands in until it does, and a track with neither simply has to
      * clear the thirty-second floor to count as a play.
      */
-    @Synchronized
+    // iOS: called on the main thread only (PlayerController), so no @Synchronized.
     fun onSample(song: Song, durationMs: Long) {
-        val now = System.currentTimeMillis()
+        val now = com.music.bitchord.platform.epochMillis()
         if (song.videoId != currentId) {
             // A new track anchors the clock and contributes nothing yet — see
             // the class note on undercounting.
@@ -97,7 +98,7 @@ object ListeningRecorder {
      * than contribute: without it, a player paused for an afternoon would hand
      * [MAX_STEP_MS] of listening to whatever was on screen when it resumed.
      */
-    @Synchronized
+    // iOS: called on the main thread only (PlayerController), so no @Synchronized.
     fun onStopped() {
         currentId = null
         playedThisTrack = 0L

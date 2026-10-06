@@ -79,6 +79,9 @@ object AppSettings {
             .let { stored -> List(EqLayout.MANUAL_COUNT) { stored.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB) } },
     ).also { flow -> persist(flow) { KeyValueStore.putString("equalizer_bands", it.joinToString(",")) } }
 
+    /** Genre charts in Your stats (needs a Last.fm key, which the iOS build does not ship). */
+    val replayGenres = boolean("replay_genres", true)
+
     /** Fixed crossfade length in seconds; 0 is off. Also Automix's fallback while a pair is unanalysed. */
     val crossfadeSeconds = int("crossfade_seconds", 0)
 

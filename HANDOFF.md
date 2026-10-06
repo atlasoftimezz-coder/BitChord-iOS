@@ -63,8 +63,8 @@ ios/                 standalone Gradle build for iOS (Kotlin 2.4.20, Compose Mul
 | P4 | Google sign-in (WKWebView, Safari user agent), Keychain session, Home feed, Library (liked songs, library songs, playlists/albums/artists), album/playlist/artist pages with Play and Shuffle, Like button, tabs | Built 2026-10-05 15:01, **not yet tested by user** |
 | P5 | Downloads (queue, 3 workers, batch bar, album/playlist Download), offline playback with stream fallback, lyrics `.lrc` sidecar + EmbeddedLyrics, Files-app import ("On this device") | Built 2026-10-05 15:54, **not yet tested by user** |
 | P6 | Crossfade and Automix: second AVPlayer deck, ported CrossfadeController (filter sweep, bass swap, vocal separation), C++ analyzer and the Beat This! / open-unmix ONNX models on iOS | Built 2026-10-05 (CI green, run 37341257483), **not tested by user** |
-| P7a | Settings screen (Library → gear), playback speed 0.5–2×, sleep timer (minutes / end of song) | Part 1 built (CI green, run 37341257483), not tested; EQ + skip silence todo |
-| P7b | History and search history, replay/stats | Todo |
+| P7a | Settings screen (Library → gear), playback speed 0.5–2×, sleep timer (minutes / end of song), in-app equalizer (tone pad, 7 bands + presets, balance), skip silence | Built 2026-10-06, not tested by user |
+| P7b | Search history (recent taps), album/artist/playlist results open their page, YouTube Music history page, listening stats ("Your stats") | Built 2026-10-06, not tested by user |
 | P7c | Scrobbling (Last.fm, ListenBrainz), Discord Rich Presence | Todo |
 | P7d | Animated album canvas | Todo |
 | P7e | Pluggable sources, PoToken, multiple accounts / brand channels, quality options | Todo |
@@ -169,7 +169,20 @@ P7 is split into P7a–P7g (table above), one CI build and one phone test each. 
 **P7a (in progress):** `ui/SettingsScreen.kt`, `playback/SleepTimer.kt` (ported) and `AppSettings.playbackSpeed`.
 - Speed: `AudioEngine.setPlaybackSpeed`. Every item uses `.spectral` pitch keeping, and the current deck plays at speed × beatmatch rate.
 - Sleep timer: the deadline is handled in `PlayerController`. "End of song" drops the gapless next and suppresses crossfades.
-- Not done: skip silence and the in-app equalizer. Both need sample access on the main deck: grow `TransitionFilter`'s tap into a small DSP chain (EQ biquads, silence detection). Planned as the rest of P7a.
+- **Equalizer:** `EqualizerCurve.kt` and `EqualizerPreset.kt` are ported, and the AppSettings fields use Android's keys.
+  - `PlayerController` computes the `EqCurve` (tone pad or bands) and passes per-slot kind, frequency, gain and Q to `AudioEngine.setEqualizer`.
+  - In Swift, `TransitionFilter.swift` is now the whole per-item tap chain: the equalizer (a port of `EqualizerProcessor`), then a silence meter, then the transition filters. The shared target lives in `EqualizerTuning`; taps copy it with a try-lock.
+  - While the equalizer or skip silence is on, every item gets a tap (`EqualizerTuning.wanted`). Otherwise taps are only attached for transitions.
+- **Skip silence:** iOS cannot drop frames inside a tap. After 0.6 s below -60 dBFS the current deck plays at 4×, back to speed when sound returns. It is checked at 4 Hz in the deck's time observer, and never during a crossfade.
+
+**P7b:**
+- Moved out of `ios/parked/` into the build: `SearchHistory`, `SearchHistoryEntity`, and `data/stats/ListeningStats`, `ListeningRecorder` and `ArtistFacts`. They are initialised in `MainViewController`.
+- `PlayerController` samples `ListeningRecorder` every 5 s while playing.
+- Search shows "Recent" (tap to play or open, ✕ to remove, Clear) while the field is empty. Album, artist and playlist results now open their page.
+- Library has "Your stats" (`ui/StatsScreen.kt`: this month / this year / all time, top songs, artists, albums) and, when signed in, "History" (`LibraryViewModel.openHistory`, YouTube Music's history).
+- Not done:
+  - Genre charts: ArtistFacts needs a Last.fm key, and `BuildConfig.LASTFM_API_KEY` is empty on iOS.
+  - The Android Replay stories, poster and share sheet. These belong to the UI port in P7g.
 
 ## Gotchas (all hit and solved)
 
@@ -188,4 +201,4 @@ P7 is split into P7a–P7g (table above), one CI build and one phone test each. 
 
 1. The latest build is green; `dist\BitChord.ipa` is P6 + P7a part 1.
 2. Get the user's test results for P3, P4, P5, P6 and P7a, and fix what is broken.
-3. Finish P7a (equalizer, skip silence), then P7b. One sub-phase at a time. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).
+3. Next sub-phase: P7c (scrobbling: Last.fm and ListenBrainz, Discord Rich Presence). The user has to supply Last.fm API keys; ListenBrainz needs only a user token. The user objected when work went beyond the phase in hand (the full UI port belongs to P7).

@@ -1,5 +1,6 @@
 package com.music.bitchord.data.stats
 
+import kotlinx.coroutines.IO
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -18,7 +19,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.Locale
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -166,9 +166,9 @@ object ArtistFacts {
         // asked about on every play forever. It expires, because the reason for
         // a miss is as often a dropped connection as an unknown artist.
         val wantsCard = browseId == null &&
-            System.currentTimeMillis() - cardAt > TimeUnit.DAYS.toMillis(RETRY_DAYS)
+            com.music.bitchord.platform.epochMillis() - cardAt > TimeUnit.DAYS.toMillis(RETRY_DAYS)
         val wantsGenres = genresAvailable && genres.isEmpty() &&
-            System.currentTimeMillis() - genresAt > TimeUnit.DAYS.toMillis(RETRY_DAYS)
+            com.music.bitchord.platform.epochMillis() - genresAt > TimeUnit.DAYS.toMillis(RETRY_DAYS)
         return wantsCard || wantsGenres
     }
 
@@ -223,7 +223,7 @@ object ArtistFacts {
                 ?: entry.image,
             browseId = hit?.browseId?.takeIf { hit.title.equals(name, ignoreCase = true) }
                 ?: entry.browseId,
-            cardAt = System.currentTimeMillis(),
+            cardAt = com.music.bitchord.platform.epochMillis(),
         )
         dirty = true
     }
@@ -252,7 +252,7 @@ object ArtistFacts {
             .toList()
 
         val entry = known[key(name)] ?: StoredArtist(key = key(name))
-        known[key(name)] = entry.copy(genres = genres, genresAt = System.currentTimeMillis())
+        known[key(name)] = entry.copy(genres = genres, genresAt = com.music.bitchord.platform.epochMillis())
         dirty = true
     }
 
@@ -265,7 +265,7 @@ object ArtistFacts {
      * admitting "seen live", just less obvious on the page.
      */
     private fun canonical(tag: String): String? {
-        val cleaned = tag.trim().lowercase(Locale.ROOT)
+        val cleaned = tag.trim().lowercase()
             .replace('-', ' ')
             .replace("&", "and")
             .replace(Regex("[^a-z0-9 ]"), "")
@@ -275,7 +275,7 @@ object ArtistFacts {
         return VOCABULARY[cleaned] ?: VOCABULARY[ALIASES[cleaned] ?: return null]
     }
 
-    private fun key(artist: String): String = artist.trim().lowercase(Locale.ROOT)
+    private fun key(artist: String): String = artist.trim().lowercase()
 
     // ── Persistence ─────────────────────────────────────────────────────────
 
@@ -380,7 +380,7 @@ object ArtistFacts {
         "cloud rap", "conscious hip hop", "west coast rap", "east coast rap",
     ).associateWith { normalised ->
         SPELLINGS[normalised] ?: normalised.split(" ").joinToString(" ") { word ->
-            word.replaceFirstChar { it.uppercase(Locale.ROOT) }
+            word.replaceFirstChar { it.uppercase() }
         }
     }
 

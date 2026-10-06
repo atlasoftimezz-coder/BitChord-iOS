@@ -45,6 +45,7 @@ import com.music.bitchord.ui.DownloadIcon
 import com.music.bitchord.ui.DownloadSessionBar
 import com.music.bitchord.ui.DownloadsScreen
 import com.music.bitchord.ui.SettingsScreen
+import com.music.bitchord.ui.StatsScreen
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.TrackAnalysisState
@@ -89,6 +90,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.music.bitchord.data.model.SearchFilter
+import com.music.bitchord.data.model.BrowseType
+import com.music.bitchord.data.model.EntityType
+import com.music.bitchord.data.model.SearchHistoryEntity
+import com.music.bitchord.data.settings.SearchHistory
+import com.music.bitchord.platform.epochMillis
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.platform.recentLog
@@ -120,6 +126,7 @@ fun App(engine: AudioEngine) {
     var downloadsOpen by remember { mutableStateOf(false) }
     var deviceOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var statsOpen by remember { mutableStateOf(false) }
     var lastCrash by remember { mutableStateOf(takeLastCrash()) }
     val clipboard = LocalClipboardManager.current
 
@@ -147,7 +154,7 @@ fun App(engine: AudioEngine) {
                     Box(Modifier.weight(1f)) {
                         when (tab) {
                             0 -> HomeTab(library, player, signedIn, onSignIn = { signInOpen = true })
-                            1 -> SearchScreen(search, player, modifier = Modifier.fillMaxSize())
+                            1 -> SearchScreen(search, player, library, modifier = Modifier.fillMaxSize())
                             else -> LibraryTab(
                                 library, player, signedIn, account,
                                 onSignIn = { signInOpen = true },
@@ -155,12 +162,14 @@ fun App(engine: AudioEngine) {
                                 onDownloads = { downloadsOpen = true },
                                 onDevice = { deviceOpen = true },
                                 onSettings = { settingsOpen = true },
+                                onStats = { statsOpen = true },
                             )
                         }
                         pages.lastOrNull()?.let { page -> PageScreen(page, library, player) }
                         if (deviceOpen) DeviceScreen(player, onClose = { deviceOpen = false })
                         if (downloadsOpen) DownloadsScreen(player, onClose = { downloadsOpen = false })
                         if (settingsOpen) SettingsScreen(onClose = { settingsOpen = false })
+                        if (statsOpen) StatsScreen(player, library, onClose = { statsOpen = false })
                     }
                     DownloadSessionBar(onOpen = { downloadsOpen = true })
                     MiniPlayer(player, onOpen = { nowPlayingOpen = true })
@@ -171,12 +180,13 @@ fun App(engine: AudioEngine) {
                             Triple("Library", Icons.Filled.LibraryMusic, 2),
                         ).forEach { (label, icon, index) ->
                             NavigationBarItem(
-                                selected = tab == index && pages.isEmpty() && !downloadsOpen && !deviceOpen && !settingsOpen,
+                                selected = tab == index && pages.isEmpty() && !downloadsOpen && !deviceOpen && !settingsOpen && !statsOpen,
                                 onClick = {
                                     while (library.closePage()) Unit
                                     downloadsOpen = false
                                     deviceOpen = false
                                     settingsOpen = false
+                                    statsOpen = false
                                     tab = index
                                 },
                                 icon = { Icon(icon, contentDescription = label) },
@@ -210,8 +220,14 @@ fun App(engine: AudioEngine) {
 }
 
 @Composable
-private fun SearchScreen(vm: SearchViewModel, player: PlayerController, modifier: Modifier = Modifier) {
+private fun SearchScreen(
+    vm: SearchViewModel,
+    player: PlayerController,
+    library: LibraryViewModel,
+    modifier: Modifier = Modifier,
+) {
     val state by vm.state.collectAsState()
+    val recent by SearchHistory.recent.collectAsState()
     val playerState by player.state.collectAsState()
     val focus = LocalFocusManager.current
     val listState = rememberLazyListState()
@@ -258,6 +274,8 @@ private fun SearchScreen(vm: SearchViewModel, player: PlayerController, modifier
         }
 
         when {
+            !state.submitted && state.query.isBlank() -> RecentSearches(recent, player, library)
+
             !state.submitted && state.suggestions.isNotEmpty() -> LazyColumn(Modifier.fillMaxSize()) {
                 itemsIndexed(state.suggestions) { _, suggestion ->
                     Row(
@@ -294,10 +312,20 @@ private fun SearchScreen(vm: SearchViewModel, player: PlayerController, modifier
                         if (song != null) {
                             SongRow(song, isCurrent = playerState.current?.videoId == song.videoId) {
                                 focus.clearFocus()
+                                SearchHistory.record(
+                                    SearchHistoryEntity(song.videoId, song.title, song.artist, song.thumbnailUrl, EntityType.TRACK),
+                                )
                                 player.playQueue(songs, songs.indexOf(song))
                             }
                         } else if (result is SearchResult.Browse) {
-                            BrowseRow(result.item.title, result.item.subtitle, result.item.thumbnailUrl)
+                            val item = result.item
+                            BrowseRow(item.title, item.subtitle, item.thumbnailUrl) {
+                                focus.clearFocus()
+                                SearchHistory.record(
+                                    SearchHistoryEntity(item.browseId, item.title, item.subtitle, item.thumbnailUrl, item.type.toEntityType()),
+                                )
+                                library.openPage(item.browseId, item.title, item.subtitle, item.thumbnailUrl)
+                            }
                         }
                     }
                     if (state.isLoadingMore) {
@@ -347,11 +375,11 @@ private fun SongRow(song: Song, isCurrent: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Albums, artists and playlists: listed now, browsable in a later phase. */
+/** An album, artist or playlist row; tapping opens its page. */
 @Composable
-private fun BrowseRow(title: String, subtitle: String, thumbnail: String?) {
+private fun BrowseRow(title: String, subtitle: String, thumbnail: String?, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Artwork(thumbnail, 52)
@@ -560,4 +588,59 @@ private fun TrackAnalysisState.label(): String = when (this) {
     TrackAnalysisState.ANALYSED -> "analysed"
     TrackAnalysisState.REFINING -> "refining"
     TrackAnalysisState.FAILED -> "no analysis"
+}
+
+private fun BrowseType.toEntityType(): EntityType = when (this) {
+    BrowseType.ALBUM -> EntityType.ALBUM
+    BrowseType.ARTIST -> EntityType.ARTIST
+    else -> EntityType.PLAYLIST
+}
+
+/** What was tapped in search lately (kept on this device), shown while the field is empty. */
+@Composable
+private fun RecentSearches(recent: List<SearchHistoryEntity>, player: PlayerController, library: LibraryViewModel) {
+    if (recent.isEmpty()) {
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.TopCenter) {
+            Text("Search for songs, albums, artists and playlists.", color = Color.Gray)
+        }
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Recent", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = SearchHistory::clear) { Text("Clear") }
+            }
+        }
+        itemsIndexed(recent) { _, entry ->
+            Row(
+                Modifier.fillMaxWidth().clickable {
+                    SearchHistory.record(entry.copy(timestamp = epochMillis()))
+                    if (entry.entityType == EntityType.TRACK) {
+                        player.playQueue(listOf(Song(videoId = entry.id, title = entry.title, artist = entry.subtitle, thumbnailUrl = entry.artworkUrl)), 0)
+                    } else {
+                        library.openPage(entry.id, entry.title, entry.subtitle, entry.artworkUrl)
+                    }
+                }.padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Artwork(entry.artworkUrl, 48)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOf(entry.entityType.name.lowercase().replaceFirstChar { it.uppercase() }, entry.subtitle)
+                            .filter { it.isNotBlank() }.joinToString(" · "),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                    )
+                }
+                IconButton(onClick = { SearchHistory.remove(entry.id) }) {
+                    Icon(Icons.Filled.Clear, contentDescription = "Remove", tint = Color.Gray)
+                }
+            }
+        }
+    }
 }

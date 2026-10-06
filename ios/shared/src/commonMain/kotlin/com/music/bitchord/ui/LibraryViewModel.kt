@@ -114,6 +114,26 @@ class LibraryViewModel {
         }
     }
 
+    /** Your YouTube Music listening history, newest first. */
+    fun openHistory() {
+        val id = "local:history"
+        _pages.update { it + Page(id, "History", "Played on any device", null) }
+        scope.launch {
+            YtMusicRepository.history()
+                .onSuccess { songs ->
+                    updatePage(id) {
+                        it.copy(
+                            songs = songs,
+                            subtitle = "${songs.size} songs",
+                            thumbnailUrl = songs.firstOrNull()?.thumbnailUrl,
+                            loading = false,
+                        )
+                    }
+                }
+                .onFailure { e -> updatePage(id) { it.copy(loading = false, error = e.message ?: "Could not load history") } }
+        }
+    }
+
     fun openPage(browseId: String, title: String, subtitle: String, thumbnailUrl: String?) {
         _pages.update { it + Page(browseId, title, subtitle, thumbnailUrl) }
         scope.launch {

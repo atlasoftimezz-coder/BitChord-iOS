@@ -7,6 +7,7 @@ import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.platform.FileSystem
 import com.music.bitchord.platform.elapsedMillis
+import com.music.bitchord.data.stats.ListeningRecorder
 import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -294,7 +295,21 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
 
     // ---- AudioEngineListener --------------------------------------------------
 
+    /** When the listening stats were last sampled; every few seconds is plenty (see ListeningRecorder). */
+    private var lastStatsSampleAt = 0L
+    private var wasPlaying = false
+
     override fun onProgress(positionMs: Long, durationMs: Long, isPlaying: Boolean, isBuffering: Boolean) {
+        val now = elapsedMillis()
+        if (isPlaying) {
+            if (now - lastStatsSampleAt >= STATS_SAMPLE_MS) {
+                lastStatsSampleAt = now
+                _state.value.current?.let { ListeningRecorder.onSample(it, durationMs) }
+            }
+        } else if (wasPlaying) {
+            ListeningRecorder.onStopped()
+        }
+        wasPlaying = isPlaying
         _state.update {
             it.copy(
                 positionMs = positionMs,
@@ -399,6 +414,7 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
 
     private companion object {
         const val TAG = "BitChord"
+        const val STATS_SAMPLE_MS = 5_000L
 
         /** [StreamResolver.Stream.profileId] of a file on the device. */
         const val LOCAL_PROFILE = "LOCAL"
