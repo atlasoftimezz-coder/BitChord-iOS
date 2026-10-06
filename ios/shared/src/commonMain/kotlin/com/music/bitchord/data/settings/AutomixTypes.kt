@@ -2,6 +2,15 @@ package com.music.bitchord.data.settings
 
 // Automix setting types, as declared in the Android AppSettings.kt.
 
+/** Which of the equaliser's two tabs is driving the sound. */
+enum class EqualizerMode {
+    /** The tone pad: tilt, contour, and how wide each is. */
+    DYNAMIC,
+
+    /** Seven sliders and a preset list. */
+    MANUAL,
+}
+
 /** CPU budget for Automix's background analysis, not its audible mix algorithm. */
 enum class AutomixPerformanceMode(val inferenceThreads: Int) {
     EFFICIENT(1),

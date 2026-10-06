@@ -32,6 +32,11 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     private var currentRate: Float = 1
     /// The listener's speed; the current deck plays at `baseSpeed * currentRate`.
     private var baseSpeed: Float = 1
+    /// True while skip silence is playing through a silent stretch at `silenceRate`.
+    private var skippingSilence = false
+    private static let silenceRate: Float = 4
+    /// Silence shorter than this is a pause in the music, not a gap to skip.
+    private static let silenceThreshold = 0.6
     /// Filters per item, attached when a transition first asks for one.
     private var filters: [ObjectIdentifier: TransitionFilter] = [:]
     private var timeObservers: [(AVQueuePlayer, Any)] = []
@@ -77,6 +82,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
             queue: .main
         ) { [weak self, weak deck] _ in
             guard let self, let deck, deck === self.player else { return }
+            self.driveSkipSilence()
             self.reportProgress()
             // The lock screen extrapolates between updates; re-anchor it every few
             // seconds so buffering stalls don't leave it running ahead.
@@ -128,9 +134,58 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
     /// Plays the current deck at `baseSpeed * currentRate` (only while playing:
     /// setting a non-zero rate on a paused AVPlayer would start it).
     private func applyRate() {
-        let rate = baseSpeed * currentRate
+        let rate = baseSpeed * currentRate * (skippingSilence ? Self.silenceRate : 1)
         if #available(iOS 16.0, *) { player.defaultRate = rate }
         if player.rate != 0 && player.rate != rate { player.rate = rate }
+    }
+
+    // MARK: - Equaliser and skip silence
+
+    func setEqualizer(enabled: Bool, kinds: KotlinIntArray, frequenciesHz: KotlinFloatArray,
+                      gainsDb: KotlinFloatArray, qs: KotlinFloatArray, preampDb: Float, balance: Float) {
+        let slots = EqualizerTuning.slots
+        EqualizerTuning.lock.lock()
+        let shared = EqualizerTuning.shared
+        shared.enabled = enabled
+        for slot in 0..<slots {
+            let index = Int32(slot)
+            if slot < Int(kinds.size) { shared.kinds[slot] = Int(kinds.get(index: index)) }
+            if slot < Int(frequenciesHz.size) { shared.frequenciesHz[slot] = frequenciesHz.get(index: index) }
+            if slot < Int(gainsDb.size) { shared.gainsDb[slot] = gainsDb.get(index: index) }
+            if slot < Int(qs.size) { shared.qs[slot] = qs.get(index: index) }
+        }
+        shared.preampDb = preampDb
+        shared.balance = balance
+        shared.version += 1
+        EqualizerTuning.lock.unlock()
+        if EqualizerTuning.wanted { attachToLoadedItems() }
+    }
+
+    func setSkipSilence(enabled: Bool) {
+        EqualizerTuning.skipSilence = enabled
+        if enabled {
+            attachToLoadedItems()
+        } else if skippingSilence {
+            skippingSilence = false
+            applyRate()
+        }
+    }
+
+    /// Items created before the equaliser or skip silence was switched on get their tap now.
+    private func attachToLoadedItems() {
+        [currentItem, nextItem].compactMap { $0 }.forEach { ensureFilter($0) }
+    }
+
+    /// Plays through a silent stretch at `silenceRate`, and back to speed the moment sound returns.
+    /// Not during a crossfade, where the tail's silence is the transition's business.
+    private func driveSkipSilence() {
+        let silent = EqualizerTuning.skipSilence && tailItem == nil && standbyItem == nil &&
+            player.timeControlStatus == .playing &&
+            (currentItem.flatMap { filters[ObjectIdentifier($0)]?.silentSeconds } ?? 0) >= Self.silenceThreshold
+        if silent != skippingSilence {
+            skippingSilence = silent
+            applyRate()
+        }
     }
 
     func setPlaybackSpeed(speed: Float) {
@@ -384,6 +439,7 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
             let item = AVPlayerItem(asset: AVURLAsset(url: source))
             item.preferredForwardBufferDuration = 30
             item.audioTimePitchAlgorithm = .spectral
+            if EqualizerTuning.wanted { ensureFilter(item) }
             return item
         }
         let loader = ChunkedResourceLoader(
@@ -408,12 +464,17 @@ final class AVAudioEngineImpl: NSObject, AudioEngine {
             }
         }
         loaders[ObjectIdentifier(item)] = loader
+        if EqualizerTuning.wanted { ensureFilter(item) }
         return item
     }
 
     /// Point the status observation and the end/fail notifications at [item].
     private func becomeCurrent(_ item: AVPlayerItem) {
         currentItem = item
+        if skippingSilence {
+            skippingSilence = false
+            applyRate()
+        }
         seekingToMs = nil
         // .initial: a queued item is usually ready before it becomes current.
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in

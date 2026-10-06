@@ -95,6 +95,25 @@ interface AudioEngine {
      */
     fun setPlaybackSpeed(speed: Float)
 
+    /**
+     * The in-app equaliser, applied to every track on both decks. [kinds],
+     * [frequenciesHz], [gainsDb] and [qs] describe one filter section per
+     * slot of [EqLayout] (kind 0 = bell, 1 = low shelf, 2 = high shelf);
+     * [preampDb] and [balance] (-1 left .. 1 right) follow them.
+     */
+    fun setEqualizer(
+        enabled: Boolean,
+        kinds: IntArray,
+        frequenciesHz: FloatArray,
+        gainsDb: FloatArray,
+        qs: FloatArray,
+        preampDb: Float,
+        balance: Float,
+    )
+
+    /** Play through silent stretches quickly instead of waiting them out. */
+    fun setSkipSilence(enabled: Boolean)
+
     /** Playback rate of the current deck; back to 1 once a beatmatched blend is over. */
     fun setCurrentRate(rate: Float)
 }

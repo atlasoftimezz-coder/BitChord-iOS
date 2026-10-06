@@ -10,6 +10,8 @@ import com.music.bitchord.platform.elapsedMillis
 import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import com.music.bitchord.data.settings.EqualizerMode
 import com.music.bitchord.playback.smart.TrackAnalyzer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +77,30 @@ class PlayerController(private val engine: AudioEngine) : AudioEngineListener {
         engine.setListener(this)
         crossfade.start()
         scope.launch { AppSettings.playbackSpeed.collect { engine.setPlaybackSpeed(it.coerceIn(0.5f, 2f)) } }
+        scope.launch { AppSettings.skipSilence.collect { engine.setSkipSilence(it) } }
+        scope.launch {
+            combine(
+                AppSettings.equalizerEnabled,
+                AppSettings.equalizerMode,
+                AppSettings.equalizerBands,
+                combine(AppSettings.equalizerToneX, AppSettings.equalizerToneY, AppSettings.equalizerFocused) { x, y, f -> Triple(x, y, f) },
+                AppSettings.equalizerBalance,
+            ) { enabled, mode, bands, tone, balance ->
+                val curve = if (mode == EqualizerMode.MANUAL) manualCurve(bands) else toneCurve(tone.first, tone.second, tone.third)
+                Pair(enabled, curve) to balance
+            }.collect { (tuning, balance) ->
+                val (enabled, curve) = tuning
+                engine.setEqualizer(
+                    enabled = enabled,
+                    kinds = IntArray(EqLayout.SLOTS) { EqLayout.slots[it].kind.ordinal },
+                    frequenciesHz = FloatArray(EqLayout.SLOTS) { EqLayout.slots[it].frequencyHz },
+                    gainsDb = curve.gainsDb,
+                    qs = curve.qs,
+                    preampDb = curve.preampDb,
+                    balance = balance.coerceIn(-1f, 1f),
+                )
+            }
+        }
         // A timed sleep timer: pause when the deadline passes (it is a deadline, so nothing has to tick).
         scope.launch {
             SleepTimer.deadline.collectLatest { deadline ->

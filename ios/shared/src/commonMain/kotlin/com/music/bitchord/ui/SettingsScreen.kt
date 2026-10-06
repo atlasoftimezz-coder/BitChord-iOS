@@ -45,6 +45,9 @@ import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.AutomixPerformanceMode
+import com.music.bitchord.data.settings.EqualizerMode
+import com.music.bitchord.playback.EqLayout
+import com.music.bitchord.playback.EqualizerPreset
 import com.music.bitchord.platform.recentLog
 import com.music.bitchord.playback.SleepTimer
 import kotlinx.coroutines.delay
@@ -67,6 +70,12 @@ fun SettingsScreen(onClose: () -> Unit) {
             item { Section("Playback") }
             item { SpeedSetting() }
             item { SleepTimerSetting() }
+            item {
+                val skip by AppSettings.skipSilence.collectAsState()
+                SwitchRow("Skip silence", "Play through silent gaps quickly.", skip) { AppSettings.skipSilence.value = it }
+            }
+            item { Section("Equalizer") }
+            item { EqualizerSetting() }
             item { Section("Transitions") }
             item { CrossfadeSetting() }
             item {
@@ -285,3 +294,97 @@ private fun AboutRows() {
         modifier = Modifier.padding(horizontal = 8.dp),
     ) { Text(if (copied) "Debug log copied" else "Copy debug log") }
 }
+
+@Composable
+private fun EqualizerSetting() {
+    val enabled by AppSettings.equalizerEnabled.collectAsState()
+    val mode by AppSettings.equalizerMode.collectAsState()
+    SwitchRow("Equalizer", "Applies to every song, downloads and streams alike.", enabled) {
+        AppSettings.equalizerEnabled.value = it
+    }
+    if (!enabled) return
+    ChipRow {
+        FilterChip(
+            selected = mode == EqualizerMode.DYNAMIC,
+            onClick = { AppSettings.equalizerMode.value = EqualizerMode.DYNAMIC },
+            label = { Text("Tone") },
+        )
+        FilterChip(
+            selected = mode == EqualizerMode.MANUAL,
+            onClick = { AppSettings.equalizerMode.value = EqualizerMode.MANUAL },
+            label = { Text("Bands") },
+        )
+    }
+    if (mode == EqualizerMode.DYNAMIC) ToneControls() else BandControls()
+    val balance by AppSettings.equalizerBalance.collectAsState()
+    Label("Balance", when {
+        balance < -0.01f -> "L ${(-balance * 100).roundToInt()}%"
+        balance > 0.01f -> "R ${(balance * 100).roundToInt()}%"
+        else -> "centre"
+    })
+    Slider(
+        value = balance,
+        onValueChange = { AppSettings.equalizerBalance.value = if (kotlin.math.abs(it) < 0.04f) 0f else it },
+        valueRange = -1f..1f,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+}
+
+@Composable
+private fun ToneControls() {
+    val x by AppSettings.equalizerToneX.collectAsState()
+    val y by AppSettings.equalizerToneY.collectAsState()
+    val focused by AppSettings.equalizerFocused.collectAsState()
+    val steps = EqLayout.TONE_STEPS
+    Label("Warm ↔ Bright", signed(x))
+    Slider(
+        value = x.toFloat(),
+        onValueChange = { AppSettings.equalizerToneX.value = it.roundToInt() },
+        valueRange = -steps.toFloat()..steps.toFloat(),
+        steps = steps * 2 - 1,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    Label("Scooped ↔ Present", signed(y))
+    Slider(
+        value = y.toFloat(),
+        onValueChange = { AppSettings.equalizerToneY.value = it.roundToInt() },
+        valueRange = -steps.toFloat()..steps.toFloat(),
+        steps = steps * 2 - 1,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    SwitchRow("Focused", "Narrower, more targeted changes.", focused) { AppSettings.equalizerFocused.value = it }
+}
+
+private fun signed(value: Int): String = if (value > 0) "+$value" else "$value"
+
+@Composable
+private fun BandControls() {
+    val bands by AppSettings.equalizerBands.collectAsState()
+    val preset = EqualizerPreset.matching(bands)
+    ChipRow {
+        EqualizerPreset.entries.filter { it != EqualizerPreset.CUSTOM }.forEach { option ->
+            FilterChip(
+                selected = preset == option,
+                onClick = { AppSettings.equalizerBands.value = option.bands },
+                label = { Text(presetLabel(option)) },
+            )
+        }
+    }
+    EqLayout.MANUAL_BANDS_HZ.forEachIndexed { index, hz ->
+        val gain = bands.getOrElse(index) { 0f }
+        Label(if (hz >= 1000f) "${(hz / 1000f).let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }} kHz" else "${hz.toInt()} Hz",
+            "${if (gain > 0) "+" else ""}${(gain * 10).roundToInt() / 10.0} dB")
+        Slider(
+            value = gain,
+            onValueChange = { value ->
+                val snapped = (value * 2).roundToInt() / 2f
+                AppSettings.equalizerBands.value = bands.toMutableList().also { it[index] = snapped }
+            },
+            valueRange = -EqLayout.MANUAL_RANGE_DB..EqLayout.MANUAL_RANGE_DB,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+    }
+}
+
+private fun presetLabel(preset: EqualizerPreset): String =
+    preset.name.lowercase().split('_').joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }

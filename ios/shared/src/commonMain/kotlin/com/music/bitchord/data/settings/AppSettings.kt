@@ -2,6 +2,7 @@ package com.music.bitchord.data.settings
 
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.platform.KeyValueStore
+import com.music.bitchord.playback.EqLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,6 +59,25 @@ object AppSettings {
     /** Playback speed, 0.5x–2x, pitch kept. */
     val playbackSpeed = MutableStateFlow(KeyValueStore.getString("playback_speed")?.toFloatOrNull() ?: 1f)
         .also { flow -> persist(flow) { KeyValueStore.putString("playback_speed", it.toString()) } }
+
+    /** Drop silent stretches (gaps, long fades to nothing) by playing through them fast. */
+    val skipSilence = boolean("skip_silence", false)
+
+    /** In-app equaliser (iOS has no system one to hand off to). Keys match Android's. */
+    val equalizerEnabled = boolean("equalizer_enabled", false)
+    val equalizerMode = MutableStateFlow(
+        EqualizerMode.entries.firstOrNull { it.name == KeyValueStore.getString("equalizer_mode") } ?: EqualizerMode.DYNAMIC,
+    ).also { flow -> persist(flow) { KeyValueStore.putString("equalizer_mode", it.name) } }
+    val equalizerToneX = int("equalizer_tone_x", 0)
+    val equalizerToneY = int("equalizer_tone_y", 0)
+    val equalizerFocused = boolean("equalizer_focused", false)
+    val equalizerBalance = MutableStateFlow(KeyValueStore.getString("equalizer_balance")?.toFloatOrNull() ?: 0f)
+        .also { flow -> persist(flow) { KeyValueStore.putString("equalizer_balance", it.toString()) } }
+    val equalizerBands = MutableStateFlow(
+        KeyValueStore.getString("equalizer_bands")?.split(",")?.mapNotNull { it.trim().toFloatOrNull() }
+            .orEmpty()
+            .let { stored -> List(EqLayout.MANUAL_COUNT) { stored.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB) } },
+    ).also { flow -> persist(flow) { KeyValueStore.putString("equalizer_bands", it.joinToString(",")) } }
 
     /** Fixed crossfade length in seconds; 0 is off. Also Automix's fallback while a pair is unanalysed. */
     val crossfadeSeconds = int("crossfade_seconds", 0)
