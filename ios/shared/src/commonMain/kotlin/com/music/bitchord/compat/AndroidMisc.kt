@@ -57,6 +57,17 @@ class SortedMutableSet<T : Comparable<T>> : AbstractMutableSet<T>() {
     fun last(): T = items.last()
 }
 
+/**
+ * JDK `Map.merge` for ported code: puts [value] when [key] is absent,
+ * otherwise stores remapping(old, value); a null result removes the key.
+ */
+fun <K, V : Any> MutableMap<K, V>.merge(key: K, value: V, remapping: (V, V) -> V?): V? {
+    val old = this[key]
+    val next = if (old == null) value else remapping(old, value)
+    if (next == null) remove(key) else this[key] = next
+    return next
+}
+
 /** JDK `Map.putIfAbsent` for ported code. */
 fun <K, V> MutableMap<K, V>.putIfAbsent(key: K, value: V): V? {
     val existing = this[key]

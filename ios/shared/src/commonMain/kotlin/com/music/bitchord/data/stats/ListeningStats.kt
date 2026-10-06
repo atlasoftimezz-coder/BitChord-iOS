@@ -1,5 +1,6 @@
 package com.music.bitchord.data.stats
 
+import com.music.bitchord.compat.merge
 import com.music.bitchord.compat.format
 import com.music.bitchord.compat.synchronized
 import kotlin.concurrent.Volatile

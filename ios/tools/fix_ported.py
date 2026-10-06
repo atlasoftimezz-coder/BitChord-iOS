@@ -49,6 +49,8 @@ def fix(text):
         text = add_import(text, "kotlin.concurrent.Volatile")
     if re.search(r"(?<![\w.])synchronized\s*\(", text):
         text = add_import(text, "com.music.bitchord.compat.synchronized")
+    if ".merge(" in text:
+        text = add_import(text, "com.music.bitchord.compat.merge")
     if ".putIfAbsent(" in text and "ConcurrentHashMap" not in text:
         text = add_import(text, "com.music.bitchord.compat.putIfAbsent")
     if re.search(r"\.format\(|String\.format\(", text):
